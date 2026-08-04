@@ -30,7 +30,7 @@ src/
 └─ interfaces/      两个 Worker 的 HTTP 入口和 React 管理界面
 ```
 
-依赖只能由外向内：`interfaces → infrastructure/application → domain`。测试中包含分层约束检查，防止领域层反向依赖框架或平台代码。详细说明见 [架构说明](./docs/architecture.md)。
+依赖只能由外向内：`interfaces → infrastructure/application → domain`。测试中包含分层约束检查，防止领域层反向依赖框架或平台代码。
 
 ## 本地运行控制台
 
@@ -56,13 +56,13 @@ npm run dev
 
 进入 Cloudflare 控制台的 **Workers 和 Pages** 页面，在右侧 **Account Details** 中复制 Account ID。下图中的账户信息已经脱敏。
 
-![Cloudflare Account ID 位置](./docs/images/cloudflare-account-id.png)
+![Cloudflare Account ID 位置](./assets/cloudflare-account-id.png)
 
 ### 创建 Cloudflare API Token
 
 创建自定义令牌时，为目标账户添加 **Workers 脚本：编辑** 和 **Workers KV 存储：编辑**，账户资源选择需要部署 Worker 的账户。不要配置客户端 IP 限制或过期时间，除非你明确需要这些限制。
 
-![Cloudflare API Token 权限配置](./docs/images/cloudflare-api-token-permissions.png)
+![Cloudflare API Token 权限配置](./assets/cloudflare-api-token-permissions.png)
 
 ## 使用 Docker Compose
 
@@ -102,8 +102,6 @@ docker run --rm -p 127.0.0.1:5173:8787 -v uglink-data:/data uglink-worker-nas:la
 npx wrangler secret put SESSION_ENCRYPTION_KEY --config wrangler.jsonc
 npm run deploy:console
 ```
-
-完整步骤见 [控制台部署配置](./docs/console-deployment.md)。
 
 ## 命令行发布代理 Worker
 
@@ -168,15 +166,7 @@ https://你的域名/.well-known/uglink-worker-health
 
 ## 安全提示
 
-配置 Custom Domain 后，对应 NAS 服务会暴露到公网。请确保后端服务自身启用了身份验证，管理后台建议额外配置 Cloudflare Access。更多内容见 [安全策略](./SECURITY.md)。
-
-## 文档
-
-- [架构说明](./docs/architecture.md)
-- [配置说明](./docs/configuration.md)
-- [部署说明](./docs/deployment.md)
-- [控制台部署配置](./docs/console-deployment.md)
-- [贡献指南](./CONTRIBUTING.md)
+配置 Custom Domain 后，对应 NAS 服务会暴露到公网。请确保后端服务自身启用了身份验证，管理后台建议额外配置 Cloudflare Access。
 
 ## 许可证
 
