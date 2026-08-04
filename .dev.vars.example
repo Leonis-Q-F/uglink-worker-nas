@@ -1,0 +1,5 @@
+# Created automatically on the first `npm run dev`.
+SESSION_ENCRYPTION_KEY=
+
+# Required only when running the gateway Worker directly.
+PASSWORD=

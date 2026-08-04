@@ -1,0 +1,16 @@
+.git
+.github
+.dev.vars*
+.env*
+.generated
+.wrangler
+.wrangler-dry-run
+dist
+node_modules
+coverage
+playwright-report
+test-results
+docs/design
+wrangler.gateway.generated.json
+*.log
+data

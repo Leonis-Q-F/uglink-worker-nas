@@ -1,0 +1,76 @@
+{
+  "name": "uglink-worker-nas",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "audit:public": "node scripts/audit-public-release.mjs",
+    "gateway:bundle": "wrangler deploy --config wrangler.gateway.bundle.jsonc --dry-run --outdir .generated/gateway --minify",
+    "config:generate": "tsx scripts/generate-config.ts",
+    "config:validate": "tsx scripts/generate-config.ts --check",
+    "local:prepare": "tsx scripts/ensure-local-secrets.ts",
+    "predev": "npm run local:prepare",
+    "dev": "npm run gateway:bundle && vite --host 127.0.0.1",
+    "dev:gateway": "npm run config:generate && wrangler dev --config wrangler.gateway.generated.json",
+    "test": "npm run test:gateway && npm run test:console",
+    "test:gateway": "tsx --test test/domain/**/*.test.ts test/infrastructure/**/*.test.ts test/interfaces/**/*.test.ts",
+    "test:console": "npm run gateway:bundle && vitest run --config vitest.config.mts",
+    "typecheck": "npm run gateway:bundle && tsc --noEmit",
+    "build": "npm run build:gateway && npm run build:console",
+    "build:gateway": "npm run config:generate && wrangler deploy --config wrangler.gateway.generated.json --dry-run",
+    "build:console": "npm run gateway:bundle && vite build && node scripts/sanitize-console-build.mjs",
+    "check": "npm run audit:public && npm run config:validate && npm test && npm run typecheck && npm run build",
+    "verify:deployment": "node scripts/validate-deployment-config.mjs",
+    "deploy": "npm run deploy:console",
+    "deploy:console": "npm run verify:deployment && npm run build:console && wrangler deploy --config wrangler.jsonc",
+    "deploy:gateway": "npm run config:generate && wrangler deploy --config wrangler.gateway.generated.json",
+    "qa:browser": "node scripts/browser-qa.mjs",
+    "docker:build": "docker build --tag uglink-worker-nas:local .",
+    "docker:up": "docker compose up --detach",
+    "docker:down": "docker compose down",
+    "secret:key": "node -e \"console.log(require('node:crypto').randomBytes(32).toString('base64url'))\""
+  },
+  "dependencies": {
+    "jsencrypt": "^3.5.4",
+    "lucide-react": "1.28.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "wrangler": "4.118.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.50.0",
+    "@cloudflare/workers-types": "5.20260801.1",
+    "@types/node": "24.7.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
+    "playwright-core": "1.62.1",
+    "tsx": "^4.20.6",
+    "typescript": "7.0.2",
+    "vite": "8.2.0",
+    "vitest": "4.1.10"
+  },
+  "overrides": {
+    "undici": "7.29.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "SESSION_ENCRYPTION_KEY": {
+        "description": "A 32-byte base64url key used to encrypt Cloudflare API tokens in console sessions."
+      },
+      "CONSOLE_SESSIONS": {
+        "description": "KV namespace used for encrypted console sessions and deployment state."
+      },
+      "PASSWORD": {
+        "description": "UGREEN remote-access password stored as a Worker secret."
+      },
+      "UGLINK_CACHE": {
+        "description": "KV namespace used to cache short-lived UGREEN proxy sessions."
+      }
+    }
+  }
+}

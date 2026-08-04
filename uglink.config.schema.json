@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:uglink:config-schema:v1",
+  "title": "UGLINK Worker configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "uglink", "services"],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 1
+    },
+    "uglink": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseUrl", "username"],
+      "properties": {
+        "baseUrl": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        }
+      }
+    },
+    "services": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "hostname", "port"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+          },
+          "hostname": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253,
+            "format": "hostname"
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      }
+    },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workersDev": {
+          "type": "boolean"
+        },
+        "previewUrls": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

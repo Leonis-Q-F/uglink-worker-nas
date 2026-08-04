@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "uglink-worker",
+  "main": "src/interfaces/http/gateway/worker.ts",
+  "compatibility_date": "2026-08-03",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {
+    "BASE_URL": "",
+    "USERNAME": "",
+    "SERVICE_MAP": "{}",
+    "SETUP_MODE": "true",
+    "SESSION_NAMESPACE": "setup"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "UGLINK_CACHE",
+      "id": "00000000000000000000000000000000"
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}
