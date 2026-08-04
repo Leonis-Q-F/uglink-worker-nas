@@ -109,7 +109,6 @@ UGLINK Worker NAS 的做法是：利用绿联已有的远程访问通道获取�
 ```bash
 # 1. 创建项目目录
 mkdir uglink && cd uglink
-mkdir data
 
 # 2. 下载 compose 配置
 cat > compose.yaml << 'EOF'
@@ -123,7 +122,7 @@ services:
     ports:
       - "5173:8787"
     volumes:
-      - ./data:/data
+      - uglink-data:/data
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -131,21 +130,17 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+
+volumes:
+  uglink-data:
+    name: uglink-data
 EOF
 
 # 3. 启动
 docker compose up -d
 ```
 
-打开 `http://设备地址:5173`，按照界面引导完成配置即可。控制台数据保存在部署目录的 `data/` 中，删除或更新容器不会清除配置。
-
-Linux 主机如果提示 `data/` 没有写入权限，请执行：
-
-```bash
-sudo chown -R 1000:1000 data
-sudo chmod 700 data
-docker compose up -d --force-recreate
-```
+打开 `http://设备地址:5173`，按照界面引导完成配置即可。控制台数据保存在 Docker 管理的 `uglink-data` 卷中，删除或更新容器不会清除配置，也不需要手动调整宿主机目录权限。
 
 > [!TIP]
 > 镜像支持 `linux/amd64` 和 `linux/arm64` 架构，可直接在绿联 NAS 的 Docker 中运行。
@@ -200,11 +195,24 @@ Gateway Worker 的核心配置，由控制台自动生成：
 
 ### 数据持久化与备份
 
-- `./data` 保存自动生成的会话加密密钥、本地 KV、加密 API Token、服务配置与诊断记录。
+- `uglink-data` 卷保存自动生成的会话加密密钥、本地 KV、加密 API Token、服务配置与诊断记录。
+- 更新时使用 `docker compose pull && docker compose up -d`；不要执行 `docker compose down --volumes` 或手动删除 `uglink-data`。
 - 配置导出文件不包含 API Token 或密码，可用于迁移服务映射。
 - 加密备份包含 Cloudflare 连接、服务配置和诊断记录，需要至少 12 个字符的独立备份密码。
 - NAS 登录密码由 Cloudflare Worker Secret 保存，Cloudflare 不允许读取 Secret 明文，因此不会进入备份文件。
-- 不要执行 `rm -rf data`，也不要把 `data/` 提交到 Git。备份文件和 `data/` 目录都应按敏感数据保管。
+- 完整灾难恢复应停止控制台后成组备份整个卷；卷备份和应用导出的加密备份都应按敏感数据保管。
+
+完整卷备份示例：
+
+```bash
+mkdir -p backup
+docker compose stop console
+docker run --rm -v uglink-data:/data:ro -v "$PWD/backup:/backup" alpine \
+  tar czf /backup/uglink-data.tgz -C /data .
+docker compose start console
+```
+
+如需直接管理宿主机文件，可以把卷改为 `/volume1/docker/uglink:/data` 等绝对路径；该高级方案需要提前为容器内 UID/GID `1000:1000` 配置写入权限。
 
 ## 本地开发
 

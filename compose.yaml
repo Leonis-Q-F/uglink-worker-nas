@@ -11,7 +11,7 @@ services:
     ports:
       - "${UGLINK_BIND_ADDRESS:-0.0.0.0}:${UGLINK_CONSOLE_PORT:-5173}:8787"
     volumes:
-      - ./data:/data
+      - uglink-data:/data
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -20,3 +20,7 @@ services:
     security_opt:
       - no-new-privileges:true
     stop_grace_period: 20s
+
+volumes:
+  uglink-data:
+    name: uglink-data

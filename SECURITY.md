@@ -14,7 +14,8 @@
 
 - 镜像构建上下文会排除 `.dev.vars`、`.env`、Wrangler 状态和生成目录；不要使用 `--build-arg` 传递任何密钥。
 - Compose 默认只绑定 `127.0.0.1`。在 NAS 上改为局域网监听前，应确认端口不会从公网访问。
-- `uglink-data` 卷包含会话加密密钥和加密后的 Cloudflare 连接。备份、迁移和删除该卷时应按敏感数据处理。
+- Compose 默认使用 Docker 管理的 `uglink-data` 卷，避免宿主机目录权限迫使容器以 root 身份运行。
+- `uglink-data` 卷包含会话加密密钥和加密后的 Cloudflare 连接。备份、迁移和删除该卷时应按敏感数据处理；不要执行 `docker compose down --volumes`。
 - 如需远程访问控制台，应放在具备身份验证和 HTTPS 的反向代理或 Cloudflare Access 后面。
 
 ## 暴露 NAS 服务的风险
