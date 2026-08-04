@@ -6,6 +6,10 @@ import type {
   WorkerTarget
 } from '../../domain/deployment/model';
 import type { CloudflareConnection } from './contracts';
+import type {
+  EncryptedControlBackup,
+  PersistedConfigurationState
+} from './contracts';
 
 export interface KvNamespaceReference {
   id: string;
@@ -51,6 +55,26 @@ export interface DeploymentJobRepository {
 export interface DiagnosticLogRepository {
   append(entries: DiagnosticEntry[]): Promise<void>;
   list(limit?: number): Promise<DiagnosticEntry[]>;
+  replace(entries: DiagnosticEntry[]): Promise<void>;
+}
+
+export interface ConfigurationRepository {
+  read(): Promise<PersistedConfigurationState | undefined>;
+  write(state: PersistedConfigurationState): Promise<void>;
+}
+
+export interface PortableBackupPayload {
+  version: 1;
+  createdAt: string;
+  connection: CloudflareConnection;
+  target: WorkerTarget;
+  configuration: PersistedConfigurationState;
+  diagnostics: DiagnosticEntry[];
+}
+
+export interface BackupCipher {
+  seal(payload: PortableBackupPayload, passphrase: string): Promise<EncryptedControlBackup>;
+  open(backup: EncryptedControlBackup, passphrase: string): Promise<PortableBackupPayload>;
 }
 
 export interface ServiceHealthChecker {

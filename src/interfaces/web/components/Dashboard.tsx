@@ -23,7 +23,11 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiGet, apiPost, ConsoleApiError } from '../lib/api';
-import type { BootstrapResponse } from '../../../application/console/contracts';
+import type {
+  BootstrapResponse,
+  PersistedConfigurationState
+} from '../../../application/console/contracts';
+import { defaultConfig } from '../../../domain/configuration/defaults';
 import type { UglinkConfig } from '../../../domain/configuration/model';
 import {
   configsEqual,
@@ -38,14 +42,9 @@ import type {
   DiagnosticLogResponse,
   ServiceHealthResponse
 } from '../../../domain/deployment/model';
-import {
-  clearDraftConfig,
-  loadLocalConfig,
-  saveDeployedConfig,
-  saveDraftConfig
-} from '../../../infrastructure/browser/config-storage';
 import { Brand } from './Brand';
 import { DiagnosticsPage } from './DiagnosticsPage';
+import { DataManagement } from './DataManagement';
 import { ProviderBadge } from './ProviderBadge';
 import { Toggle } from './Toggle';
 
@@ -199,8 +198,6 @@ function compactFailureLabel(result: ServiceHealthResponse['services'][number]):
     proxy_session_unavailable: '会话异常',
     service_entry_timeout: '入口超时',
     service_entry_unreachable: '入口断开',
-    nas_backend_timeout: 'NAS 超时',
-    nas_backend_unreachable: 'NAS 断开',
     worker_health_invalid_response: '响应异常',
     worker_hostname_unconfigured: '域名未配置'
   };
@@ -553,14 +550,22 @@ function Inspector({ validation, config, job }: InspectorProps) {
 
 interface SecurityPageProps {
   bootstrap: BootstrapResponse;
+  config: UglinkConfig;
   resetting: boolean;
   onReset: () => void;
+  onConfigurationImported: (snapshot: PersistedConfigurationState) => void;
+  onRestored: (bootstrap: BootstrapResponse) => void;
+  onNotice: (type: 'success' | 'error', message: string) => void;
 }
 
 function SecurityPage({
   bootstrap,
+  config,
   resetting,
-  onReset
+  onReset,
+  onConfigurationImported,
+  onRestored,
+  onNotice
 }: SecurityPageProps) {
   return (
     <div className="section-page">
@@ -580,7 +585,7 @@ function SecurityPage({
         </section>
         <section className="panel security-card">
           <span className="security-card__icon"><HardDrive size={21} /></span>
-          <div><h2>本地配置</h2><p>NAS 地址、登录用户名与服务映射仅保存在当前浏览器。登录密码不会写入本地存储。</p></div>
+          <div><h2>持久化配置</h2><p>NAS 地址、登录用户名与服务映射保存在服务器数据目录，不再依赖当前浏览器。</p></div>
           <span className="status-chip status-chip--success"><Check size={12} /> 已安全保存</span>
         </section>
         <section className="panel security-card security-card--wide">
@@ -591,6 +596,13 @@ function SecurityPage({
           </div>
           <span className="status-chip status-chip--success"><Check size={12} /> 已启用</span>
         </section>
+        <DataManagement
+          csrfToken={bootstrap.csrfToken}
+          config={config}
+          onConfigurationImported={onConfigurationImported}
+          onRestored={onRestored}
+          onNotice={onNotice}
+        />
       </div>
     </div>
   );
@@ -598,13 +610,19 @@ function SecurityPage({
 
 export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
   const target = bootstrap.target!;
-  const initialLocalConfig = useMemo(() => loadLocalConfig(target), [target]);
-  const initialHasPublishedServices = initialLocalConfig.deployed.services.some((service) => service.enabled !== false);
+  const initialConfiguration = useMemo(() => {
+    const deployed = bootstrap.configuration?.deployed || defaultConfig();
+    return {
+      deployed,
+      config: bootstrap.configuration?.draft || deployed
+    };
+  }, [bootstrap.configuration]);
+  const initialHasPublishedServices = initialConfiguration.deployed.services.some((service) => service.enabled !== false);
   const [section, setSection] = useState<Section>('services');
-  const [config, setConfig] = useState<UglinkConfig>(initialLocalConfig.config);
-  const [savedConfig, setSavedConfig] = useState<UglinkConfig>(initialLocalConfig.deployed);
+  const [config, setConfig] = useState<UglinkConfig>(() => initialConfiguration.config);
+  const [savedConfig, setSavedConfig] = useState<UglinkConfig>(() => initialConfiguration.deployed);
   const [password, setPassword] = useState('');
-  const [validation, setValidation] = useState<ValidationResponse>(validateUglinkConfig(initialLocalConfig.config));
+  const [validation, setValidation] = useState<ValidationResponse>(() => validateUglinkConfig(initialConfiguration.config));
   const [job, setJob] = useState<DeploymentJob>();
   const [deploymentConfig, setDeploymentConfig] = useState<UglinkConfig>();
   const [publishedHealth, setPublishedHealth] = useState<ServiceHealthResponse>();
@@ -618,6 +636,8 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
   const [resettingConnection, setResettingConnection] = useState(false);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; message: string }>();
   const healthRequestVersion = useRef(0);
+  const autosaveReady = useRef(false);
+  const autosaveQueue = useRef<Promise<unknown>>(Promise.resolve());
   const hasPublishedServices = savedConfig.services.some((service) => service.enabled !== false);
 
   useEffect(() => {
@@ -625,12 +645,25 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
   }, [section]);
 
   useEffect(() => {
-    if (configsEqual(config, savedConfig)) {
-      clearDraftConfig(target);
-    } else {
-      saveDraftConfig(target, config);
+    if (!autosaveReady.current) {
+      autosaveReady.current = true;
+      return undefined;
     }
-  }, [config, savedConfig, target]);
+    const timer = window.setTimeout(() => {
+      autosaveQueue.current = autosaveQueue.current
+        .catch(() => undefined)
+        .then(() => apiPost<PersistedConfigurationState>(
+          '/api/configuration/draft',
+          bootstrap.csrfToken,
+          { config }
+        ))
+        .catch((error) => setNotice({
+          type: 'error',
+          message: `配置自动保存失败：${errorMessage(error)}`
+        }));
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [bootstrap.csrfToken, config]);
 
   const loadDiagnostics = useCallback(async (showLoading = true) => {
     if (showLoading) setDiagnosticsLoading(true);
@@ -754,7 +787,6 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
         setNotice({ type: 'error', message: created.message });
       } else {
         if (mode === 'publish') {
-          saveDeployedConfig(target, nextConfig);
           setSavedConfig(nextConfig);
           setPassword('');
         }
@@ -779,7 +811,6 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
 
   const reset = () => {
     setConfig(savedConfig);
-    clearDraftConfig(target);
     setPassword('');
     setValidation(validateUglinkConfig(savedConfig));
     setNotice({ type: 'success', message: '未发布的本地修改已撤销。' });
@@ -894,8 +925,16 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
           ) : section === 'security' ? (
             <SecurityPage
               bootstrap={bootstrap}
+              config={config}
               resetting={resettingConnection}
               onReset={() => void resetConnection()}
+              onConfigurationImported={(snapshot) => {
+                setSavedConfig(snapshot.deployed);
+                setConfig(snapshot.draft || snapshot.deployed);
+                setValidation(validateUglinkConfig(snapshot.draft || snapshot.deployed));
+              }}
+              onRestored={() => window.location.reload()}
+              onNotice={(type, message) => setNotice({ type, message })}
             />
           ) : null}
         </main>

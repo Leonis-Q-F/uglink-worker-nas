@@ -109,6 +109,7 @@ UGLINK Worker NAS 的做法是：利用绿联已有的远程访问通道获取�
 ```bash
 # 1. 创建项目目录
 mkdir uglink && cd uglink
+mkdir data
 
 # 2. 下载 compose 配置
 cat > compose.yaml << 'EOF'
@@ -120,9 +121,9 @@ services:
     init: true
     restart: unless-stopped
     ports:
-      - "127.0.0.1:5173:8787"
+      - "5173:8787"
     volumes:
-      - uglink-data:/data
+      - ./data:/data
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -130,16 +131,21 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-
-volumes:
-  uglink-data:
 EOF
 
 # 3. 启动
 docker compose up -d
 ```
 
-打开 `http://127.0.0.1:5173`，按照界面引导完成配置即可。
+打开 `http://设备地址:5173`，按照界面引导完成配置即可。控制台数据保存在部署目录的 `data/` 中，删除或更新容器不会清除配置。
+
+Linux 主机如果提示 `data/` 没有写入权限，请执行：
+
+```bash
+sudo chown -R 1000:1000 data
+sudo chmod 700 data
+docker compose up -d --force-recreate
+```
 
 > [!TIP]
 > 镜像支持 `linux/amd64` 和 `linux/arm64` 架构，可直接在绿联 NAS 的 Docker 中运行。
@@ -187,10 +193,18 @@ Gateway Worker 的核心配置，由控制台自动生成：
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `UGLINK_BIND_ADDRESS` | 绑定地址 | `127.0.0.1` |
+| `UGLINK_BIND_ADDRESS` | 绑定地址 | `0.0.0.0` |
 | `UGLINK_CONSOLE_PORT` | 控制台端口 | `5173` |
 | `UGLINK_IMAGE` | Docker 镜像 | `ghcr.io/leonis-q-f/uglink-worker-nas:latest` |
 | `SESSION_ENCRYPTION_KEY` | 会话加密密钥（可选，自动生成） | 自动生成 |
+
+### 数据持久化与备份
+
+- `./data` 保存自动生成的会话加密密钥、本地 KV、加密 API Token、服务配置与诊断记录。
+- 配置导出文件不包含 API Token 或密码，可用于迁移服务映射。
+- 加密备份包含 Cloudflare 连接、服务配置和诊断记录，需要至少 12 个字符的独立备份密码。
+- NAS 登录密码由 Cloudflare Worker Secret 保存，Cloudflare 不允许读取 Secret 明文，因此不会进入备份文件。
+- 不要执行 `rm -rf data`，也不要把 `data/` 提交到 Git。备份文件和 `data/` 目录都应按敏感数据保管。
 
 ## 本地开发
 
@@ -232,7 +246,7 @@ src/
 > 通过 Custom Domain 暴露 NAS 服务到公网存在风险。请务必阅读 [SECURITY.md](SECURITY.md)。
 
 - 绿联密码仅存储在 Worker Secret，API Token 加密存储在服务端会话
-- Docker 默认只绑定 `127.0.0.1`，容器以非 root 用户运行并丢弃所有 capabilities
+- Docker 默认监听所有本机网络接口；请仅在可信局域网使用，远程访问时必须配置 HTTPS 和访问控制
 - 不要使用 Global API Key，不要把密码提交到 Git
 - 远程访问控制台请配合反向代理 + HTTPS 或 [Cloudflare Access](https://www.cloudflare.com/products/zero-trust/access/)
 

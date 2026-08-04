@@ -21,6 +21,7 @@ export interface BootstrapResponse {
     cloudflare: ProviderStatus;
   };
   target?: PublicWorkerTarget;
+  configuration?: PersistedConfigurationState;
 }
 
 export interface DeployRequest {
@@ -42,4 +43,44 @@ export interface CloudflareConnection {
     name: string;
   };
   connectedAt: number;
+}
+
+export interface PersistedConfigurationState {
+  version: 1;
+  deployed: UglinkConfig;
+  draft?: UglinkConfig;
+  updatedAt: string;
+}
+
+export interface ConfigurationImportRequest {
+  config: UglinkConfig;
+}
+
+export interface BackupKdfParameters {
+  name: 'PBKDF2';
+  hash: 'SHA-256';
+  iterations: number;
+  salt: string;
+}
+
+export interface BackupCipherParameters {
+  name: 'AES-GCM';
+  iv: string;
+  data: string;
+}
+
+export interface EncryptedControlBackup {
+  format: 'uglink-control-backup';
+  version: 1;
+  createdAt: string;
+  kdf: BackupKdfParameters;
+  cipher: BackupCipherParameters;
+}
+
+export interface BackupPassphraseRequest {
+  passphrase: string;
+}
+
+export interface BackupRestoreRequest extends BackupPassphraseRequest {
+  backup: EncryptedControlBackup;
 }

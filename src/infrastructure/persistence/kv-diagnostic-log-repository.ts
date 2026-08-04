@@ -31,10 +31,6 @@ function isDiagnosticEntry(value: unknown): value is DiagnosticEntry {
     && typeof entry.occurrences === 'number';
 }
 
-function isCurrentDiagnostic(entry: DiagnosticEntry): boolean {
-  return !(entry.source === 'health_check' && entry.stage === 'nas_backend');
-}
-
 export function createKvDiagnosticLogRepository(
   namespace: KVNamespace,
   sessionId: string,
@@ -45,7 +41,7 @@ export function createKvDiagnosticLogRepository(
   async function readEntries(): Promise<DiagnosticEntry[]> {
     const stored = await namespace.get<DiagnosticStore>(key, 'json');
     if (!stored || stored.version !== 1 || !Array.isArray(stored.entries)) return [];
-    return stored.entries.filter(isDiagnosticEntry).filter(isCurrentDiagnostic).slice(0, MAX_DIAGNOSTICS);
+    return stored.entries.filter(isDiagnosticEntry).slice(0, MAX_DIAGNOSTICS);
   }
 
   return {
@@ -77,6 +73,17 @@ export function createKvDiagnosticLogRepository(
     async list(limit = 50): Promise<DiagnosticEntry[]> {
       const safeLimit = Math.max(1, Math.min(limit, MAX_DIAGNOSTICS));
       return (await readEntries()).slice(0, safeLimit);
+    },
+    async replace(entries: DiagnosticEntry[]): Promise<void> {
+      const normalized = entries
+        .filter(isDiagnosticEntry)
+        .slice(0, MAX_DIAGNOSTICS);
+      await namespace.put(key, JSON.stringify({
+        version: 1,
+        entries: normalized
+      } satisfies DiagnosticStore), {
+        expirationTtl: DIAGNOSTIC_TTL_SECONDS
+      });
     }
   };
 }

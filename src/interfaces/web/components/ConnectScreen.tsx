@@ -1,6 +1,7 @@
 import {
   ArrowRight,
   ArrowUpRight,
+  ArchiveRestore,
   Cloud,
   Database,
   KeyRound,
@@ -14,6 +15,7 @@ import { useState, type FormEvent } from 'react';
 import { apiPost, ConsoleApiError } from '../lib/api';
 import type { BootstrapResponse } from '../../../application/console/contracts';
 import { Brand } from './Brand';
+import { BackupDialog } from './BackupDialog';
 
 interface ConnectScreenProps {
   bootstrap: BootstrapResponse;
@@ -32,6 +34,7 @@ export function ConnectScreen({ bootstrap }: ConnectScreenProps) {
   const [workerName, setWorkerName] = useState('uglink-worker');
   const [busy, setBusy] = useState(false);
   const [connectionError, setConnectionError] = useState<string>();
+  const [restoringBackup, setRestoringBackup] = useState(false);
   const canConnect = accountId.trim().length === 32
     && apiToken.trim().length >= 20
     && workerName.trim().length > 0;
@@ -169,7 +172,7 @@ export function ConnectScreen({ bootstrap }: ConnectScreenProps) {
                       autoComplete="new-password"
                       spellCheck={false}
                     />
-                    <small>Token 不会写入浏览器存储、本地配置或日志。</small>
+                    <small>Token 不会写入浏览器存储或日志，只会在服务端加密保存。</small>
                   </label>
                 </div>
               </section>
@@ -199,9 +202,21 @@ export function ConnectScreen({ bootstrap }: ConnectScreenProps) {
                 </button>
               </div>
             </form>
+            <div className="connect-restore">
+              <div><strong>已经有控制台备份？</strong><p>使用备份密码恢复 Cloudflare 连接和服务配置。</p></div>
+              <button className="button button--secondary" type="button" onClick={() => setRestoringBackup(true)}>
+                <ArchiveRestore size={15} /> 恢复备份
+              </button>
+            </div>
           </div>
         </main>
       </div>
+      <BackupDialog
+        csrfToken={bootstrap.csrfToken}
+        mode={restoringBackup ? 'restore' : undefined}
+        onClose={() => setRestoringBackup(false)}
+        onRestored={() => window.location.reload()}
+      />
     </div>
   );
 }
