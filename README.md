@@ -52,6 +52,18 @@ npm run dev
 
 建议把 Token 的资源范围限制在目标账户，不要使用 Global API Key。
 
+### 查找 Cloudflare Account ID
+
+进入 Cloudflare 控制台的 **Workers 和 Pages** 页面，在右侧 **Account Details** 中复制 Account ID。下图中的账户信息已经脱敏。
+
+![Cloudflare Account ID 位置](./docs/images/cloudflare-account-id.png)
+
+### 创建 Cloudflare API Token
+
+创建自定义令牌时，为目标账户添加 **Workers 脚本：编辑** 和 **Workers KV 存储：编辑**，账户资源选择需要部署 Worker 的账户。不要配置客户端 IP 限制或过期时间，除非你明确需要这些限制。
+
+![Cloudflare API Token 权限配置](./docs/images/cloudflare-api-token-permissions.png)
+
 ## 使用 Docker Compose
 
 Docker 方式运行的是本地管理控制台。公开镜像托管在 GHCR，并支持 `linux/amd64` 与 `linux/arm64`。镜像启动时会在具名卷中自动生成会话加密密钥，并把本地 KV 状态持久化到同一个卷；密钥和 Cloudflare API Token 不会写入镜像。
