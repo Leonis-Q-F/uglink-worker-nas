@@ -1,173 +1,250 @@
-# UGLINK Worker Gateway
+<p align="center">
+  <img src="https://img.icons8.com/fluency/96/cloud-link.png" alt="UGLINK Logo" width="96" />
+  <br />
+  <strong style="font-size: 1.5em;">UGLINK Worker NAS</strong>
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+<div align="center">
 
-通过 Cloudflare Worker，把同一绿联云账户下的多个 NAS HTTP 服务映射到不同的自定义域名，并提供一个可视化控制台完成配置、发布和健康检查。
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Container Image](https://ghcr-badge.egpl.dev/leonis-q-f/uglink-worker-nas/latest_tag?trim=major&label=latest)](https://github.com/Leonis-Q-F/uglink-worker-nas/pkgs/container/uglink-worker-nas)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22.12-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com)
 
-每位使用者拥有自己的 Worker、KV、域名和凭据。项目不提供中央代理服务，也不会把 NAS 密码写入配置文件或浏览器存储。
+</div>
 
-## 功能
+<div align="center">
+  <h3>
+    <a href="#快速开始">快速开始</a>
+    <span> · </span>
+    <a href="#docker-部署推荐">Docker 部署</a>
+    <span> · </span>
+    <a href="#配置说明">配置说明</a>
+    <span> · </span>
+    <a href="SECURITY.md">安全策略</a>
+  </h3>
+</div>
 
-- 一个 Worker 支持多个“域名 → NAS 端口”映射。
-- 可视化配置 Cloudflare Account ID、API Token、NAS 地址和服务列表。
-- 自动创建或复用 KV、发布 Worker、设置 Secret 并同步 Custom Domains。
-- 自动登录绿联云并按账户及端口隔离短期代理会话。
-- 仅在绿联代理跳转到登录页时刷新会话，后端应用的 `401`、`403` 和普通重定向原样透传。
-- 保留后端应用 Cookie，并拒绝客户端伪造绿联代理 Cookie。
-- 不接受 URL 参数指定端口，避免 Worker 成为开放代理。
-- 页面刷新后自动检查所有已发布 Worker 的服务入口和域名绑定状态，不探测 NAS 业务路径。
-- 按服务入口、Worker 配置和 NAS 后端记录结构化故障信息，并支持使用已发布配置覆盖部署受管 Worker。
+<br />
 
-## 架构
+## 为什么做这个项目？
 
-仓库采用 DDD 分层，所有运行时代码集中在一套工程中：
+绿联 NAS 的远程访问功能 (UGLINK) 体验不够理想：依赖官方中转服务器、速度受限、不支持自定义域名。而大多数家庭宽带没有公网 IP，传统的 DDNS + 端口转发方案也难以适用。
 
-```text
-src/
-├─ domain/          领域模型、配置规则、部署状态和代理路由
-├─ application/     Cloudflare 连接、发布和代理请求用例及端口
-├─ infrastructure/  Cloudflare、绿联、KV、加密、健康检查和浏览器存储适配器
-└─ interfaces/      两个 Worker 的 HTTP 入口和 React 管理界面
+我们希望有一种方式，**不需要公网 IP、不需要复杂的网络配置**，就能通过自己的域名稳定地访问 NAS 上运行的各种服务。
+
+UGLINK Worker NAS 的做法是：利用绿联已有的远程访问通道获取代理凭证，再通过 Cloudflare Workers 把流量转发到 NAS —— 相当于把 Cloudflare 的全球边缘网络变成了你的 NAS 入口。
+
+**它的特点：**
+
+- **零门槛** — Cloudflare 免费计划就够用，不需要公网 IP
+- **可视化操作** — 一个 Web 控制台搞定所有配置和部署，不需要碰命令行
+- **安全** — 密码和 Token 加密存储在服务端，不会出现在浏览器
+- **自托管** — 数据完全在你自己手里，Docker 一行命令启动
+- **开源** — MIT 协议，随意使用和修改
+
+## 工作原理
+
+```
+                   你的浏览器
+                       │
+                       ▼
+           ┌───────────────────────┐
+           │   Cloudflare Workers  │  ← 全球边缘网络
+           │   (Gateway Worker)    │
+           └───────────┬───────────┘
+                       │  UGLINK 远程代理通道
+                       ▼
+           ┌───────────────────────┐
+           │     绿联 NAS          │  ← 你的本地服务
+           │  (管理面板/文件/媒体)    │
+           └───────────────────────┘
 ```
 
-依赖只能由外向内：`interfaces → infrastructure/application → domain`。测试中包含分层约束检查，防止领域层反向依赖框架或平台代码。
+项目包含两个组件：
 
-## 本地运行控制台
+| 组件 | 部署位置 | 说明 |
+|------|---------|------|
+| **Console 管理控制台** | 本地 Docker 或 Cloudflare | Web UI，配置连接信息、管理服务映射、一键部署 |
+| **Gateway Worker** | Cloudflare | 反向代理，接收请求后通过 UGLINK 通道转发到 NAS |
 
-要求 Node.js 20.19 或更高的兼容版本（也支持 Node.js 22.12 以上版本）。
+## 快速开始
 
-```sh
-npm install
-npm run dev
-```
+### 前置条件
 
-首次启动会在根目录自动创建 `.dev.vars` 和随机的 `SESSION_ENCRYPTION_KEY`，后续启动会复用同一密钥且不会覆盖。访问 `http://127.0.0.1:5173` 后，控制台会要求填写 Cloudflare Account ID、限定权限的 API Token 和目标 Worker 名称。
+- 一台绿联 NAS，已启用远程访问（UGLINK）
+- 一个 [Cloudflare 账户](https://dash.cloudflare.com/sign-up)（免费计划即可）
+- Docker 和 Docker Compose（用于本地部署管理控制台）
 
-`.dev.vars` 只用于本机且已被 Git 忽略。不要删除或提交该文件；删除后再次启动会生成新密钥，原有本地登录会话将无法解密。
+### 获取 Cloudflare Account ID
 
-控制台需要以下 Cloudflare 权限：
+登录 [Cloudflare Dashboard](https://dash.cloudflare.com)，进入 **Workers & Pages** 页面，在右侧即可找到你的 Account ID：
 
-- `Workers Scripts Write`
-- `Workers KV Storage Write`
+<p align="center">
+  <img src="assets/cloudflare-account-id.png" alt="在 Cloudflare Workers & Pages 页面找到 Account ID" width="720" />
+</p>
 
-建议把 Token 的资源范围限制在目标账户，不要使用 Global API Key。
+### 创建 API Token
 
-### 查找 Cloudflare Account ID
+前往 [API Tokens](https://dash.cloudflare.com/profile/api-tokens) 页面创建一个自定义 Token，所需权限如下：
 
-进入 Cloudflare 控制台的 **Workers 和 Pages** 页面，在右侧 **Account Details** 中复制 Account ID。下图中的账户信息已经脱敏。
+<p align="center">
+  <img src="assets/cloudflare-api-token-permissions.png" alt="API Token 权限配置" width="720" />
+</p>
 
-![Cloudflare Account ID 位置](./assets/cloudflare-account-id.png)
+> [!WARNING]
+> **不要使用 Global API Key。** 只需要授予以下最小权限，并把范围限制到目标账户：
+>
+> | 权限 | 级别 |
+> |------|------|
+> | Account / Workers Scripts | Edit |
+> | Account / Workers KV Storage | Edit |
 
-### 创建 Cloudflare API Token
+---
 
-创建自定义令牌时，为目标账户添加 **Workers 脚本：编辑** 和 **Workers KV 存储：编辑**，账户资源选择需要部署 Worker 的账户。不要配置客户端 IP 限制或过期时间，除非你明确需要这些限制。
+### Docker 部署（推荐）
 
-![Cloudflare API Token 权限配置](./assets/cloudflare-api-token-permissions.png)
+适合在绿联 NAS 或任何 Docker 环境上运行。
 
-## 使用 Docker Compose
+```bash
+# 1. 创建项目目录
+mkdir uglink && cd uglink
 
-Docker 方式运行的是本地管理控制台。公开镜像托管在 GHCR，并支持 `linux/amd64` 与 `linux/arm64`。镜像启动时会在具名卷中自动生成会话加密密钥，并把本地 KV 状态持久化到同一个卷；密钥和 Cloudflare API Token 不会写入镜像。
+# 2. 下载 compose 配置
+cat > compose.yaml << 'EOF'
+name: uglink
 
-```sh
-docker compose pull
+services:
+  console:
+    image: ghcr.io/leonis-q-f/uglink-worker-nas:latest
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5173:8787"
+    volumes:
+      - uglink-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  uglink-data:
+EOF
+
+# 3. 启动
 docker compose up -d
 ```
 
-默认访问地址为 `http://127.0.0.1:5173`。查看日志和停止服务：
+打开 `http://127.0.0.1:5173`，按照界面引导完成配置即可。
 
-```sh
-docker compose logs -f
-docker compose down
-```
+> [!TIP]
+> 镜像支持 `linux/amd64` 和 `linux/arm64` 架构，可直接在绿联 NAS 的 Docker 中运行。
 
-`docker compose down` 不会删除数据卷。只有明确执行 `docker compose down -v` 才会删除本地会话、加密密钥和已保存的 Cloudflare 连接。NAS 上需要从局域网访问时，可复制 [`.env.example`](./.env.example) 为 `.env`，再把 `UGLINK_BIND_ADDRESS` 改为 NAS 的局域网地址或 `0.0.0.0`；不要把未加保护的控制台直接暴露到公网。
+### 从源码部署
 
-公开镜像允许匿名拉取，不需要登录 GitHub。需要从当前源码重新构建时：
-
-```sh
-docker compose up --build -d
-# 或者
-docker build -t uglink-worker-nas:latest .
-docker run --rm -p 127.0.0.1:5173:8787 -v uglink-data:/data uglink-worker-nas:latest
-```
-
-## 发布控制台到 Cloudflare
-
-1. 创建 `CONSOLE_SESSIONS` Workers KV 命名空间。
-2. 把命名空间 ID 写入 [`wrangler.jsonc`](./wrangler.jsonc)。
-3. 设置生产会话加密密钥。
-4. 发布控制台。
-
-```sh
-npx wrangler secret put SESSION_ENCRYPTION_KEY --config wrangler.jsonc
+```bash
+git clone https://github.com/Leonis-Q-F/uglink-worker-nas.git
+cd uglink-worker-nas
+npm ci
 npm run deploy:console
 ```
 
-## 命令行发布代理 Worker
+> 需要先通过 `wrangler login` 登录 Cloudflare。
 
-不使用控制台时，可以编辑 [`uglink.config.json`](./uglink.config.json)：
+## 配置说明
 
-```json
+### uglink.config.json
+
+Gateway Worker 的核心配置，由控制台自动生成：
+
+```jsonc
 {
-  "$schema": "./uglink.config.schema.json",
   "version": 1,
   "uglink": {
-    "baseUrl": "https://example.cn99.ug.link",
+    "baseUrl": "https://your-uglink-url.example.com",
     "username": "your-username"
   },
   "services": [
     {
-      "name": "api",
-      "hostname": "api.example.com",
-      "port": 8317,
+      "name": "nas-admin",
+      "hostname": "nas.example.com",
+      "port": 8443,
       "enabled": true
     }
   ],
   "deployment": {
-    "workersDev": false,
+    "workersDev": true,
     "previewUrls": false
   }
 }
 ```
 
-先在 [`wrangler.gateway.jsonc`](./wrangler.gateway.jsonc) 中填写 `UGLINK_CACHE` 的 KV ID，再设置密码并发布：
+### 环境变量
 
-```sh
-npm run config:generate
-npx wrangler secret put PASSWORD --config wrangler.gateway.generated.json
-npm run deploy:gateway
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `UGLINK_BIND_ADDRESS` | 绑定地址 | `127.0.0.1` |
+| `UGLINK_CONSOLE_PORT` | 控制台端口 | `5173` |
+| `UGLINK_IMAGE` | Docker 镜像 | `ghcr.io/leonis-q-f/uglink-worker-nas:latest` |
+| `SESSION_ENCRYPTION_KEY` | 会话加密密钥（可选，自动生成） | 自动生成 |
+
+## 本地开发
+
+```bash
+npm ci             # 安装依赖
+npm run dev        # 启动控制台开发服务器
+npm run dev:gateway    # 启动 Gateway Worker 开发模式
+npm test           # 运行测试
+npm run typecheck  # 类型检查
+npm run check      # 完整检查（审计 + 测试 + 类型 + 构建）
 ```
 
-生成的 `wrangler.gateway.generated.json` 不会提交到 Git，不要直接编辑。
+## 项目架构
 
-## 常用命令
-
-```sh
-npm run dev              # 启动管理控制台
-npm run dev:gateway      # 启动代理 Worker
-npm test                 # 运行全部测试
-npm run typecheck        # TypeScript 检查
-npm run build            # 构建控制台和代理 Worker
-npm run check            # 完整交付检查
-npm run deploy:console   # 发布管理控制台
-npm run deploy:gateway   # 发布代理 Worker
-npm run docker:build     # 构建本地容器镜像
-npm run docker:up        # 使用 Compose 构建并启动
-npm run docker:down      # 停止 Compose 服务并保留数据卷
+```
+src/
+├── domain/            # 领域层 — 核心业务模型与规则
+│   ├── configuration/     # 配置校验
+│   ├── deployment/        # 部署流程模型
+│   └── proxy/             # 代理路由
+├── application/       # 应用层 — 用例编排
+│   ├── console/           # 控制台（连接、部署）
+│   └── gateway/           # 网关请求处理
+├── infrastructure/    # 基础设施层 — 外部服务适配
+│   ├── cloudflare/        # Cloudflare API
+│   ├── persistence/       # KV 存储
+│   ├── security/          # 会话加密
+│   └── ugreen/            # 绿联代理通信
+└── interfaces/        # 接口层
+    ├── http/              # Worker 入口（Console / Gateway）
+    └── web/               # React 前端控制台
 ```
 
-健康检查地址：
+**技术栈：** TypeScript · React 19 · Vite · Cloudflare Workers · Cloudflare KV · Wrangler · Docker
 
-```text
-https://你的域名/.well-known/uglink-worker-health
+## 安全
+
+> [!IMPORTANT]
+> 通过 Custom Domain 暴露 NAS 服务到公网存在风险。请务必阅读 [SECURITY.md](SECURITY.md)。
+
+- 绿联密码仅存储在 Worker Secret，API Token 加密存储在服务端会话
+- Docker 默认只绑定 `127.0.0.1`，容器以非 root 用户运行并丢弃所有 capabilities
+- 不要使用 Global API Key，不要把密码提交到 Git
+- 远程访问控制台请配合反向代理 + HTTPS 或 [Cloudflare Access](https://www.cloudflare.com/products/zero-trust/access/)
+
+## 贡献
+
+欢迎提交 Issue 和 Pull Request！
+
+```bash
+# 提交前请通过完整检查
+npm run check
 ```
 
-该端点不会访问 NAS，也不会返回端口、用户名或代理凭据。
+## 许可协议
 
-## 安全提示
-
-配置 Custom Domain 后，对应 NAS 服务会暴露到公网。请确保后端服务自身启用了身份验证，管理后台建议额外配置 Cloudflare Access。
-
-## 许可证
-
-本项目采用 [MIT License](./LICENSE)。
+[MIT](LICENSE)
