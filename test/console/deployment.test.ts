@@ -7,6 +7,7 @@ import { createCloudflareDeploymentProvider } from '../../src/infrastructure/clo
 import { httpServiceHealthChecker } from '../../src/infrastructure/health/http-service-health-checker';
 import { createKvDeploymentJobRepository } from '../../src/infrastructure/persistence/kv-deployment-job-repository';
 import { createKvDiagnosticLogRepository } from '../../src/infrastructure/persistence/kv-diagnostic-log-repository';
+import { createKvConfigurationRepository } from '../../src/infrastructure/persistence/kv-configuration-repository';
 import { randomToken } from '../../src/infrastructure/security/session-crypto';
 
 function envelope(result: unknown, status = 200): Response {
@@ -69,6 +70,7 @@ function service() {
       'test-session-id-that-is-long-enough-for-storage',
       target
     ),
+    configuration: createKvConfigurationRepository(namespace, target),
     health: httpServiceHealthChecker,
     tokens: { create: randomToken }
   });
@@ -153,6 +155,7 @@ describe('production Cloudflare deployment', () => {
       if (url.endsWith('/workers/scripts/uglink-test/settings') && method === 'GET') {
         return envelope({
           bindings: [
+            { name: 'UGLINK_CONTROL_MANAGED', type: 'plain_text', text: 'v1' },
             { name: 'BASE_URL', type: 'plain_text', text: 'https://device.example.test' },
             { name: 'USERNAME', type: 'plain_text', text: 'test-user' },
             { name: 'SERVICE_MAP', type: 'plain_text', text: '{}' },

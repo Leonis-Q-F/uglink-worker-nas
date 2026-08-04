@@ -24,7 +24,6 @@ export type DiagnosticSeverity = 'error' | 'warning';
 export type DiagnosticStage =
   | 'service_entry'
   | 'worker_configuration'
-  | 'nas_backend'
   | 'configuration'
   | 'cloudflare_access'
   | 'session_cache'

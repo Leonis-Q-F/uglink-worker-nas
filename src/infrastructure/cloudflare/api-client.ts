@@ -227,10 +227,7 @@ export async function assertWorkerOwnership(
     && binding.type === 'plain_text'
     && binding.text === 'v1'
   ));
-  const names = new Set(bindings.map((binding) => binding.name));
-  const legacyUglink = ['BASE_URL', 'USERNAME', 'SERVICE_MAP', 'UGLINK_CACHE']
-    .every((name) => names.has(name));
-  if (managed || legacyUglink) return;
+  if (managed) return;
 
   throw new ApplicationError(
     409,

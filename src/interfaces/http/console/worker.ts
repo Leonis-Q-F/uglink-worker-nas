@@ -1,7 +1,12 @@
 import { connectCloudflare } from '../../../application/console/connection-service';
+import { createBackupService } from '../../../application/console/backup-service';
+import { createConfigurationService } from '../../../application/console/configuration-service';
 import type {
+  BackupPassphraseRequest,
+  BackupRestoreRequest,
   BootstrapResponse,
   CloudflareConnectionRequest,
+  ConfigurationImportRequest,
   DeployRequest,
   ProviderStatus
 } from '../../../application/console/contracts';
@@ -23,6 +28,8 @@ import {
 } from '../../../infrastructure/persistence/console-session';
 import { createKvDeploymentJobRepository } from '../../../infrastructure/persistence/kv-deployment-job-repository';
 import { createKvDiagnosticLogRepository } from '../../../infrastructure/persistence/kv-diagnostic-log-repository';
+import { createKvConfigurationRepository } from '../../../infrastructure/persistence/kv-configuration-repository';
+import { portableBackupCipher } from '../../../infrastructure/security/portable-backup';
 import { randomToken } from '../../../infrastructure/security/session-crypto';
 import { apiError, assertSameOrigin, json, readJson } from '../http';
 import type { ConsoleWorkerEnv } from './environment';
@@ -33,7 +40,7 @@ function providerStatus(connected: boolean, label?: string, detail?: string): Pr
     : { state: 'disconnected' };
 }
 
-function bootstrap(env: ConsoleWorkerEnv, session: SessionHandle): BootstrapResponse {
+async function bootstrap(env: ConsoleWorkerEnv, session: SessionHandle): Promise<BootstrapResponse> {
   const connection = session.data.cloudflare;
   const target = session.data.target;
   const cloudflare = providerStatus(
@@ -41,16 +48,22 @@ function bootstrap(env: ConsoleWorkerEnv, session: SessionHandle): BootstrapResp
     connection?.account.name,
     target ? `服务 · ${target.workerName}` : undefined
   );
+  const configuration = target
+    ? await createConfigurationService(
+      createKvConfigurationRepository(env.CONSOLE_SESSIONS, target)
+    ).read()
+    : undefined;
   return {
     title: env.CONSOLE_TITLE || 'UGLINK Control',
     authenticated: Boolean(connection && target),
     csrfToken: session.data.csrfToken,
     providers: { cloudflare },
-    ...(target ? {
+    ...(target && configuration ? {
       target: {
         ...target,
         accountIdSuffix: target.accountId.slice(-6)
-      }
+      },
+      configuration
     } : {})
   };
 }
@@ -66,6 +79,7 @@ function deploymentService(env: ConsoleWorkerEnv, session: SessionHandle) {
     provider: createCloudflareDeploymentProvider(connection.apiToken),
     jobs: createKvDeploymentJobRepository(env.CONSOLE_SESSIONS, session.id),
     diagnostics: createKvDiagnosticLogRepository(env.CONSOLE_SESSIONS, session.id, target),
+    configuration: createKvConfigurationRepository(env.CONSOLE_SESSIONS, target),
     health: httpServiceHealthChecker,
     tokens: { create: randomToken }
   });
@@ -90,7 +104,7 @@ async function connect(
 async function route(request: Request, env: ConsoleWorkerEnv, session: SessionHandle): Promise<Response> {
   const { pathname } = new URL(request.url);
   if (request.method === 'GET' && pathname === '/api/bootstrap') {
-    return json(bootstrap(env, session));
+    return json(await bootstrap(env, session));
   }
 
   if (request.method === 'POST' && pathname === '/api/connections/cloudflare') {
@@ -106,6 +120,33 @@ async function route(request: Request, env: ConsoleWorkerEnv, session: SessionHa
     deploymentService(env, session);
     const body = await readJson<{ config?: UglinkConfig }>(request);
     return json(validateUglinkConfig(body.config));
+  }
+
+  if (request.method === 'POST' && pathname === '/api/configuration/draft') {
+    assertSameOrigin(request);
+    assertCsrf(request, session);
+    const target = session.data.target;
+    if (!target) throw new ApplicationError(401, 'cloudflare_not_connected', '请先配置 Cloudflare API Token。');
+    const body = await readJson<ConfigurationImportRequest>(request);
+    const service = createConfigurationService(createKvConfigurationRepository(env.CONSOLE_SESSIONS, target));
+    return json(await service.saveDraft(body.config));
+  }
+
+  if (request.method === 'POST' && pathname === '/api/configuration/import') {
+    assertSameOrigin(request);
+    assertCsrf(request, session);
+    const target = session.data.target;
+    if (!target) throw new ApplicationError(401, 'cloudflare_not_connected', '请先配置 Cloudflare API Token。');
+    const body = await readJson<ConfigurationImportRequest>(request);
+    const service = createConfigurationService(createKvConfigurationRepository(env.CONSOLE_SESSIONS, target));
+    return json(await service.importAsDraft(body.config));
+  }
+
+  if (request.method === 'GET' && pathname === '/api/configuration/export') {
+    const target = session.data.target;
+    if (!target) throw new ApplicationError(401, 'cloudflare_not_connected', '请先配置 Cloudflare API Token。');
+    const service = createConfigurationService(createKvConfigurationRepository(env.CONSOLE_SESSIONS, target));
+    return json(await service.exportCurrent());
   }
 
   if (request.method === 'POST' && pathname === '/api/deploy') {
@@ -124,6 +165,56 @@ async function route(request: Request, env: ConsoleWorkerEnv, session: SessionHa
 
   if (request.method === 'GET' && pathname === '/api/diagnostics') {
     return json({ entries: await deploymentService(env, session).listDiagnostics() });
+  }
+
+  if (request.method === 'POST' && pathname === '/api/backups/export') {
+    assertSameOrigin(request);
+    assertCsrf(request, session);
+    const connection = session.data.cloudflare;
+    const target = session.data.target;
+    if (!connection || !target) {
+      throw new ApplicationError(401, 'cloudflare_not_connected', '请先配置 Cloudflare API Token。');
+    }
+    const body = await readJson<BackupPassphraseRequest>(request, 4_096);
+    const configurationRepository = createKvConfigurationRepository(env.CONSOLE_SESSIONS, target);
+    const diagnostics = createKvDiagnosticLogRepository(env.CONSOLE_SESSIONS, session.id, target);
+    const configuration = await createConfigurationService(configurationRepository).read();
+    const backup = createBackupService(portableBackupCipher, cloudflareConnectionProvider);
+    return json(await backup.exportBackup({
+      connection,
+      target,
+      configuration: {
+        version: 1,
+        deployed: configuration.deployed,
+        ...(configuration.draft ? { draft: configuration.draft } : {}),
+        updatedAt: configuration.updatedAt
+      },
+      diagnostics: await diagnostics.list(100)
+    }, body.passphrase));
+  }
+
+  if (request.method === 'POST' && pathname === '/api/backups/restore') {
+    assertSameOrigin(request);
+    assertCsrf(request, session);
+    const body = await readJson<BackupRestoreRequest>(request, 1_048_576);
+    const backup = createBackupService(portableBackupCipher, cloudflareConnectionProvider);
+    const restored = await backup.restoreBackup(body.backup, body.passphrase);
+    session.data.cloudflare = restored.connection;
+    session.data.target = restored.target;
+    const configuration = createConfigurationService(
+      createKvConfigurationRepository(env.CONSOLE_SESSIONS, restored.target)
+    );
+    const diagnostics = createKvDiagnosticLogRepository(
+      env.CONSOLE_SESSIONS,
+      session.id,
+      restored.target
+    );
+    await Promise.all([
+      configuration.replace(restored.configuration),
+      diagnostics.replace(restored.diagnostics),
+      saveSession(env, session)
+    ]);
+    return json(await bootstrap(env, session));
   }
 
   const deploymentMatch = pathname.match(/^\/api\/deployments\/([A-Za-z0-9_-]{12,80})$/u);

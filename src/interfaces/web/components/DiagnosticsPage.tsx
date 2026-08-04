@@ -35,7 +35,6 @@ interface DiagnosticsPageProps {
 const STAGE_LABELS: Record<DiagnosticStage, string> = {
   service_entry: '服务入口',
   worker_configuration: 'Worker 配置',
-  nas_backend: 'NAS 后端',
   configuration: '配置检查',
   cloudflare_access: 'Cloudflare 授权',
   session_cache: '会话缓存',

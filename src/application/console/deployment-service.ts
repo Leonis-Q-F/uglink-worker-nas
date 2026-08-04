@@ -2,6 +2,7 @@ import { ApplicationError } from '../common/application-error';
 import type { DeployRequest } from './contracts';
 import type {
   CloudflareDeploymentProvider,
+  ConfigurationRepository,
   DeploymentJobRepository,
   DiagnosticLogRepository,
   ServiceHealthChecker,
@@ -29,6 +30,7 @@ export interface DeploymentServiceDependencies {
   diagnostics: DiagnosticLogRepository;
   health: ServiceHealthChecker;
   tokens: TokenGenerator;
+  configuration: ConfigurationRepository;
 }
 
 function timelineLabel(phase: DeploymentPhase): string {
@@ -118,7 +120,7 @@ function validateDeployRequest(request: DeployRequest): { config: UglinkConfig; 
 }
 
 export function createDeploymentService(dependencies: DeploymentServiceDependencies) {
-  const { target, provider, jobs, diagnostics, health, tokens } = dependencies;
+  const { target, provider, jobs, diagnostics, health, tokens, configuration } = dependencies;
 
   async function appendDiagnostics(entries: DiagnosticEntry[]): Promise<void> {
     if (entries.length === 0) return;
@@ -305,6 +307,11 @@ export function createDeploymentService(dependencies: DeploymentServiceDependenc
             : '服务已发布，正在等待访问域名生效。'
         );
       }
+      await configuration.write({
+        version: 1,
+        deployed: config,
+        updatedAt: new Date().toISOString()
+      });
     } catch (error) {
       job.failure = deploymentFailure(error, job.phase);
       advance(job, 'failed', failureMessage(job.failure));
