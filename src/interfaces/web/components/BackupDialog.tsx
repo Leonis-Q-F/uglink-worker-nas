@@ -1,5 +1,5 @@
-import { ArchiveRestore, DatabaseBackup, LoaderCircle, LockKeyhole, X } from 'lucide-react';
-import { useEffect, useState, type FormEvent } from 'react';
+import { ArchiveRestore, DatabaseBackup, LoaderCircle, LockKeyhole, Upload, X } from 'lucide-react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type {
   BackupRestoreRequest,
   BootstrapResponse,
@@ -37,6 +37,7 @@ export function BackupDialog({
   const [file, setFile] = useState<File>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setPassphrase('');
@@ -99,15 +100,28 @@ export function BackupDialog({
         </div>
         <form className="dialog__form" onSubmit={submit}>
           {!exporting && (
-            <label className="field">
+            <div className="field">
               <span>备份文件</span>
               <input
+                ref={fileInput}
+                className="visually-hidden"
                 type="file"
                 accept="application/json,.json"
                 onChange={(event) => setFile(event.target.files?.[0])}
               />
+              <span className="dialog-file-picker">
+                <button
+                  className="button button--secondary"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => fileInput.current?.click()}
+                >
+                  <Upload size={15} /> 选择备份文件
+                </button>
+                <span title={file?.name}>{file?.name || '尚未选择备份文件'}</span>
+              </span>
               <small>请选择由本控制台导出的加密备份文件。</small>
-            </label>
+            </div>
           )}
           <label className="field">
             <span><LockKeyhole size={14} /> 备份密码</span>

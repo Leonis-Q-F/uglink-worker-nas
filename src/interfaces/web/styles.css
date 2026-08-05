@@ -1260,6 +1260,7 @@ button:disabled,
 
 .deployment-options .panel__heading {
   padding-bottom: 13px;
+  margin-bottom: 16px;
 }
 
 .option-row {
@@ -1568,7 +1569,8 @@ button:disabled,
 .toast {
   position: fixed;
   right: 24px;
-  bottom: 88px;
+  top: 88px;
+  bottom: auto;
   display: grid;
   width: min(410px, calc(100vw - 32px));
   min-height: 48px;
@@ -2669,11 +2671,12 @@ select:focus {
 
 .deployment-options .panel__heading {
   padding-bottom: 16px;
+  margin-bottom: 20px;
 }
 
 .option-row {
   min-height: 78px;
-  margin: 0 20px 16px;
+  margin: 0 20px 20px;
   border: 1px solid rgba(216, 229, 242, 0.82);
   border-radius: 18px;
   padding: 16px 18px;
@@ -2842,7 +2845,8 @@ select:focus {
 
 .toast {
   right: 20px;
-  bottom: 80px;
+  top: 88px;
+  bottom: auto;
   width: min(420px, calc(100vw - 32px));
   min-height: 52px;
   grid-template-columns: 22px 1fr 26px;
@@ -3587,7 +3591,8 @@ select:focus {
 
   .toast {
     right: 16px;
-    bottom: 132px;
+    top: 76px;
+    bottom: auto;
   }
 
   .deployment-grid,
@@ -3786,6 +3791,10 @@ select:focus {
   border-bottom: 1px solid var(--border);
 }
 
+.dialog__heading--decision {
+  grid-template-columns: 42px 1fr;
+}
+
 .dialog__heading h2 {
   font-size: 18px;
   line-height: 1.35;
@@ -3810,11 +3819,56 @@ select:focus {
   gap: 6px;
 }
 
+.dialog__form .field > .dialog-file-picker {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 8px;
+  background: #ffffff;
+}
+
+.dialog-file-picker > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .dialog__actions {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
   margin-top: 4px;
+}
+
+.cloud-config-summary {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  color: var(--navy);
+  background: var(--surface-blue);
+}
+
+.cloud-config-summary strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.cloud-config-summary p,
+.dialog__note {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .form-error {
@@ -3854,6 +3908,15 @@ select:focus {
   .dialog__form {
     padding-right: 18px;
     padding-left: 18px;
+  }
+
+  .dialog__form .field > .dialog-file-picker {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dialog-file-picker .button {
+    width: 100%;
   }
 }
 

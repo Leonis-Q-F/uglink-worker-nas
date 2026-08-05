@@ -55,6 +55,15 @@ interface DashboardProps {
   onConnectionReset: () => void;
 }
 
+interface CloudConfigurationDialogProps {
+  workerName: string;
+  serviceCount: number;
+  busy?: 'import' | 'dismiss';
+  error?: string;
+  onImport: () => void;
+  onDismiss: () => void;
+}
+
 const SECTION_COPY: Record<Section, { label: string; description: string }> = {
   services: { label: '服务配置', description: '管理 NAS 连接与访问域名' },
   diagnostics: { label: '故障诊断', description: '查看服务检查与部署错误' },
@@ -66,6 +75,45 @@ function errorMessage(error: unknown): string {
     return error.detail ? `${error.message}（${error.detail}）` : error.message;
   }
   return error instanceof Error ? error.message : '发生了未知错误。';
+}
+
+function CloudConfigurationDialog({
+  workerName,
+  serviceCount,
+  busy,
+  error,
+  onImport,
+  onDismiss
+}: CloudConfigurationDialogProps) {
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <section className="dialog" role="dialog" aria-modal="true" aria-labelledby="cloud-config-dialog-title">
+        <div className="dialog__heading dialog__heading--decision">
+          <span className="security-card__icon security-card__icon--orange"><Cloud size={21} /></span>
+          <div>
+            <h2 id="cloud-config-dialog-title">检测到已有配置</h2>
+            <p>Cloudflare 中的 {workerName} 保存了已发布配置，是否导入当前控制台？</p>
+          </div>
+        </div>
+        <div className="dialog__form">
+          <div className="cloud-config-summary">
+            <Cloud size={19} />
+            <div><strong>{serviceCount} 个已发布服务</strong><p>导入后将替换当前已发布配置和本地草稿。</p></div>
+          </div>
+          <p className="dialog__note">API Token 和 NAS 密码不会从云端配置读取。</p>
+          {error && <p className="form-error">{error}</p>}
+          <div className="dialog__actions">
+            <button className="button button--secondary" type="button" onClick={onDismiss} disabled={Boolean(busy)}>
+              {busy === 'dismiss' && <LoaderCircle className="spin" size={16} />} 暂不导入
+            </button>
+            <button className="button button--primary" type="button" onClick={onImport} disabled={Boolean(busy)}>
+              {busy === 'import' ? <LoaderCircle className="spin" size={16} /> : <Cloud size={16} />} 导入配置
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function formatTime(value: string): string {
@@ -635,6 +683,9 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
   const [busy, setBusy] = useState<'validate' | 'deploy'>();
   const [resettingConnection, setResettingConnection] = useState(false);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; message: string }>();
+  const [cloudConfiguration, setCloudConfiguration] = useState(bootstrap.cloudConfiguration);
+  const [cloudConfigurationBusy, setCloudConfigurationBusy] = useState<'import' | 'dismiss'>();
+  const [cloudConfigurationError, setCloudConfigurationError] = useState<string>();
   const healthRequestVersion = useRef(0);
   const autosaveReady = useRef(false);
   const autosaveQueue = useRef<Promise<unknown>>(Promise.resolve());
@@ -828,6 +879,42 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
     }
   };
 
+  const importCloudConfiguration = async () => {
+    setCloudConfigurationBusy('import');
+    setCloudConfigurationError(undefined);
+    try {
+      const imported = await apiPost<BootstrapResponse>(
+        '/api/configuration/cloud/import',
+        bootstrap.csrfToken
+      );
+      const snapshot = imported.configuration;
+      if (!snapshot) throw new Error('Cloudflare 配置导入后没有返回配置。');
+      setSavedConfig(snapshot.deployed);
+      setConfig(snapshot.draft || snapshot.deployed);
+      setValidation(validateUglinkConfig(snapshot.draft || snapshot.deployed));
+      setCloudConfiguration(undefined);
+      setNotice({ type: 'success', message: 'Cloudflare 已发布配置已导入。' });
+    } catch (error) {
+      setCloudConfigurationError(errorMessage(error));
+    } finally {
+      setCloudConfigurationBusy(undefined);
+    }
+  };
+
+  const dismissCloudConfiguration = async () => {
+    setCloudConfigurationBusy('dismiss');
+    setCloudConfigurationError(undefined);
+    try {
+      await apiPost<{ ok: true }>('/api/configuration/cloud/dismiss', bootstrap.csrfToken);
+      setCloudConfiguration(undefined);
+      setNotice({ type: 'success', message: '已保留当前控制台配置。' });
+    } catch (error) {
+      setCloudConfigurationError(errorMessage(error));
+    } finally {
+      setCloudConfigurationBusy(undefined);
+    }
+  };
+
   const navItems: Array<{ id: Section; icon: typeof ServerCog }> = [
     { id: 'services', icon: ServerCog },
     { id: 'diagnostics', icon: TriangleAlert },
@@ -873,7 +960,6 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
             <div><span className="health-dot health-dot--ok" /><strong>{target.workerName}</strong></div>
             <small>Account ID ···{target.accountIdSuffix}</small>
           </div>
-          <div className="sidebar-hosting"><Cloud size={16} /><span>由 Cloudflare 托管</span><Check size={14} /></div>
         </aside>
 
         <main className={`app-main${section === 'services' ? ' app-main--editor' : ''}`}>
@@ -958,9 +1044,20 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
         </footer>
       )}
 
+      {cloudConfiguration && (
+        <CloudConfigurationDialog
+          workerName={target.workerName}
+          serviceCount={cloudConfiguration.serviceCount}
+          busy={cloudConfigurationBusy}
+          error={cloudConfigurationError}
+          onImport={() => void importCloudConfiguration()}
+          onDismiss={() => void dismissCloudConfiguration()}
+        />
+      )}
+
       {notice && (
         <div
-          className={`toast toast--${notice.type}${section === 'services' ? ' toast--beside-inspector' : ''}`}
+          className={`toast toast--${notice.type}`}
           role="status"
         >
           {notice.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}

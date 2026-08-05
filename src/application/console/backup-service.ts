@@ -6,7 +6,7 @@ import type {
 } from './contracts';
 import type {
   BackupCipher,
-  CloudflareConnectionProvider,
+  CloudflareCredentialProvider,
   PortableBackupPayload
 } from './ports';
 import type { DiagnosticEntry, WorkerTarget } from '../../domain/deployment/model';
@@ -58,7 +58,7 @@ function normalizedConfiguration(value: PersistedConfigurationState): PersistedC
 
 export function createBackupService(
   cipher: BackupCipher,
-  connections: CloudflareConnectionProvider
+  connections: CloudflareCredentialProvider
 ) {
   async function exportBackup(
     source: BackupExportSource,

@@ -27,8 +27,16 @@ export interface CloudflareDeploymentStatus {
   message?: string;
 }
 
-export interface CloudflareConnectionProvider {
+export interface CloudflareCredentialProvider {
   connect(accountId: string, apiToken: string): Promise<CloudflareConnection>;
+}
+
+export interface CloudflareConnectionProvider extends CloudflareCredentialProvider {
+  loadDeployedConfiguration(
+    accountId: string,
+    apiToken: string,
+    workerName: string
+  ): Promise<UglinkConfig | undefined>;
 }
 
 export interface CloudflareDeploymentProvider {
@@ -40,6 +48,11 @@ export interface CloudflareDeploymentProvider {
     config: UglinkConfig,
     namespace: KvNamespaceReference
   ): Promise<WorkerUploadResult>;
+  saveConfiguration(
+    target: WorkerTarget,
+    config: UglinkConfig,
+    namespace: KvNamespaceReference
+  ): Promise<void>;
   updatePassword(target: WorkerTarget, password: string): Promise<void>;
   reconcileDomains(target: WorkerTarget, hostnames: string[]): Promise<void>;
   updateSubdomain(target: WorkerTarget, workersDev: boolean, previewUrls: boolean): Promise<void>;

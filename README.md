@@ -40,6 +40,7 @@ UGLINK Worker NAS 的做法是：利用绿联已有的远程访问通道获取�
 - **零门槛** — Cloudflare 免费计划就够用，不需要公网 IP
 - **可视化操作** — 一个 Web 控制台搞定所有配置和部署，不需要碰命令行
 - **安全** — 密码和 Token 加密存储在服务端，不会出现在浏览器
+- **云端恢复** — 连接已有 UGLINK Worker 时，检测并确认导入 Cloudflare KV 中的已发布配置
 - **自托管** — 数据完全在你自己手里，Docker 一行命令启动
 - **开源** — MIT 协议，随意使用和修改
 
@@ -196,6 +197,7 @@ Gateway Worker 的核心配置，由控制台自动生成：
 ### 数据持久化与备份
 
 - `uglink-data` 卷保存自动生成的会话加密密钥、本地 KV、加密 API Token、服务配置与诊断记录。
+- 已发布的非秘密配置同步到目标 Worker 的 `UGLINK_CACHE` KV；API Token、NAS 密码和本地草稿不会同步。
 - 更新时使用 `docker compose pull && docker compose up -d`；不要执行 `docker compose down --volumes` 或手动删除 `uglink-data`。
 - 配置导出文件不包含 API Token 或密码，可用于迁移服务映射。
 - 加密备份包含 Cloudflare 连接、服务配置和诊断记录，需要至少 12 个字符的独立备份密码。

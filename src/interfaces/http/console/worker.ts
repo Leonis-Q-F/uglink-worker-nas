@@ -58,6 +58,11 @@ async function bootstrap(env: ConsoleWorkerEnv, session: SessionHandle): Promise
     authenticated: Boolean(connection && target),
     csrfToken: session.data.csrfToken,
     providers: { cloudflare },
+    ...(session.data.pendingCloudConfiguration ? {
+      cloudConfiguration: {
+        serviceCount: session.data.pendingCloudConfiguration.services.length
+      }
+    } : {}),
     ...(target && configuration ? {
       target: {
         ...target,
@@ -92,11 +97,12 @@ async function connect(
 ): Promise<BootstrapResponse> {
   const result = await connectCloudflare(request, cloudflareConnectionProvider);
   session.data.cloudflare = result.connection;
-  session.data.target = {
-    accountId: result.connection.account.id,
-    accountName: result.connection.account.name,
-    workerName: result.workerName
-  };
+  session.data.target = result.target;
+  if (result.deployedConfiguration) {
+    session.data.pendingCloudConfiguration = result.deployedConfiguration;
+  } else {
+    delete session.data.pendingCloudConfiguration;
+  }
   await saveSession(env, session);
   return bootstrap(env, session);
 }
@@ -130,6 +136,30 @@ async function route(request: Request, env: ConsoleWorkerEnv, session: SessionHa
     const body = await readJson<ConfigurationImportRequest>(request);
     const service = createConfigurationService(createKvConfigurationRepository(env.CONSOLE_SESSIONS, target));
     return json(await service.saveDraft(body.config));
+  }
+
+  if (request.method === 'POST' && pathname === '/api/configuration/cloud/import') {
+    assertSameOrigin(request);
+    assertCsrf(request, session);
+    const target = session.data.target;
+    const cloudConfiguration = session.data.pendingCloudConfiguration;
+    if (!target || !cloudConfiguration) {
+      throw new ApplicationError(409, 'cloudflare_configuration_unavailable', '没有等待导入的 Cloudflare 配置。');
+    }
+    await createConfigurationService(
+      createKvConfigurationRepository(env.CONSOLE_SESSIONS, target)
+    ).saveDeployed(cloudConfiguration);
+    delete session.data.pendingCloudConfiguration;
+    await saveSession(env, session);
+    return json(await bootstrap(env, session));
+  }
+
+  if (request.method === 'POST' && pathname === '/api/configuration/cloud/dismiss') {
+    assertSameOrigin(request);
+    assertCsrf(request, session);
+    delete session.data.pendingCloudConfiguration;
+    await saveSession(env, session);
+    return json({ ok: true });
   }
 
   if (request.method === 'POST' && pathname === '/api/configuration/import') {
@@ -227,6 +257,7 @@ async function route(request: Request, env: ConsoleWorkerEnv, session: SessionHa
     assertCsrf(request, session);
     delete session.data.cloudflare;
     delete session.data.target;
+    delete session.data.pendingCloudConfiguration;
     await saveSession(env, session);
     return json({ ok: true });
   }

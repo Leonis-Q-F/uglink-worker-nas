@@ -4,6 +4,7 @@
 
 - 绿联密码只能存放在 Cloudflare Worker Secret `PASSWORD` 中。
 - Cloudflare API Token 只允许保存在控制台的加密服务端会话中，不得写入浏览器存储或项目配置。
+- 已发布的服务配置会写入目标 Worker 的 KV 以支持恢复，其中不得包含 API Token、NAS 密码或会话凭据。
 - API Token 应只授予 `Workers Scripts Write` 与 `Workers KV Storage Write`，并把资源范围限制到目标账户。
 - 不要使用权限覆盖整个 Cloudflare 账户的 Global API Key。
 - 不要把真实密码写入 issue、日志、配置文件、截图或 Git 提交。

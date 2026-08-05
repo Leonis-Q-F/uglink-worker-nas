@@ -1,6 +1,7 @@
 import type { CloudflareConnection } from '../../application/console/contracts';
 import { ApplicationError } from '../../application/common/application-error';
 import type { WorkerTarget } from '../../domain/deployment/model';
+import type { UglinkConfig } from '../../domain/configuration/model';
 import { constantTimeEqual, openJson, randomToken, sealJson } from '../security/session-crypto';
 
 const COOKIE_NAME = 'uglink_console_session';
@@ -13,6 +14,7 @@ export interface SessionData {
   csrfToken: string;
   cloudflare?: CloudflareConnection;
   target?: WorkerTarget;
+  pendingCloudConfiguration?: UglinkConfig;
 }
 
 export interface SessionHandle {

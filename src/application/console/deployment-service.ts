@@ -268,6 +268,7 @@ export function createDeploymentService(dependencies: DeploymentServiceDependenc
       advance(job, 'uploading', '正在发布服务配置。');
       await jobs.save(job);
       const upload = await provider.uploadWorker(target, config, namespace);
+      await provider.saveConfiguration(target, config, namespace);
       if (upload.deploymentId) job.cloudflareDeploymentId = upload.deploymentId;
       advance(job, 'uploading', '服务已发布。');
       await jobs.save(job);

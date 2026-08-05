@@ -43,5 +43,15 @@ export async function connectCloudflare(
 ) {
   const normalized = normalizeConnectionRequest(request);
   const connection = await provider.connect(normalized.accountId, normalized.apiToken);
-  return { connection, workerName: normalized.workerName };
+  const target = {
+    accountId: connection.account.id,
+    accountName: connection.account.name,
+    workerName: normalized.workerName
+  };
+  const deployedConfiguration = await provider.loadDeployedConfiguration(
+    target.accountId,
+    normalized.apiToken,
+    target.workerName
+  );
+  return { connection, target, deployedConfiguration };
 }

@@ -41,6 +41,23 @@ let lastDeploymentMode;
 let publishedHealthRequests = 0;
 let publishedServicesHealthy = true;
 let diagnosticEntries = [];
+let cloudConfiguration;
+
+function emptyConfig() {
+  return {
+    $schema: './uglink.config.schema.json',
+    version: 1,
+    uglink: { baseUrl: '', username: '' },
+    services: [],
+    deployment: { workersDev: true, previewUrls: false }
+  };
+}
+
+let configuration = {
+  version: 1,
+  deployed: emptyConfig(),
+  updatedAt: new Date().toISOString()
+};
 
 function bootstrap() {
   return {
@@ -52,7 +69,11 @@ function bootstrap() {
         ? { state: 'connected', label: account.name, detail: target ? `服务 · ${target.workerName}` : '请选择账户和服务' }
         : { state: 'disconnected' }
     },
-    ...(target ? { target } : {})
+    ...(target ? {
+      target,
+      configuration,
+      ...(cloudConfiguration ? { cloudConfiguration: { serviceCount: cloudConfiguration.services.length } } : {})
+    } : {})
   };
 }
 
@@ -92,7 +113,32 @@ await page.route('**/api/**', async (route) => {
       accountIdSuffix: String(body.accountId).slice(-6),
       workerName: String(body.workerName).trim().toLowerCase()
     };
+    cloudConfiguration = target.workerName === 'uglink-reconnected'
+      ? configuration.deployed
+      : undefined;
     return jsonResponse(route, bootstrap());
+  }
+  if (request.method() === 'POST' && url.pathname === '/api/configuration/draft') {
+    configuration = {
+      version: 1,
+      deployed: configuration.deployed,
+      draft: request.postDataJSON().config,
+      updatedAt: new Date().toISOString()
+    };
+    return jsonResponse(route, configuration);
+  }
+  if (request.method() === 'POST' && url.pathname === '/api/configuration/cloud/import') {
+    configuration = {
+      version: 1,
+      deployed: cloudConfiguration,
+      updatedAt: new Date().toISOString()
+    };
+    cloudConfiguration = undefined;
+    return jsonResponse(route, bootstrap());
+  }
+  if (request.method() === 'POST' && url.pathname === '/api/configuration/cloud/dismiss') {
+    cloudConfiguration = undefined;
+    return jsonResponse(route, { ok: true });
   }
   if (request.method() === 'POST' && url.pathname === '/api/validate') {
     return jsonResponse(route, validation());
@@ -142,6 +188,11 @@ await page.route('**/api/**', async (route) => {
   }
   if (request.method() === 'POST' && url.pathname === '/api/deploy') {
     const body = request.postDataJSON();
+    configuration = {
+      version: 1,
+      deployed: body.config,
+      updatedAt: new Date().toISOString()
+    };
     deploymentRequests += 1;
     lastDeploymentMode = body.mode;
     const now = new Date().toISOString();
@@ -202,6 +253,7 @@ await page.route('**/api/**', async (route) => {
   if (request.method() === 'POST' && url.pathname === '/api/connections/cloudflare/reset') {
     cloudflareConnected = false;
     target = undefined;
+    cloudConfiguration = undefined;
     return jsonResponse(route, { ok: true });
   }
   return jsonResponse(route, { error: { code: 'not_mocked', message: `Unmocked ${request.method()} ${url.pathname}` } }, 500);
@@ -226,11 +278,21 @@ try {
   await page.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: '服务配置', exact: true }).waitFor();
   assert(await page.locator('.app-sidebar nav button').count() === 3, 'Desktop navigation contains service configuration, diagnostics, and security.');
+  assert(await page.getByText('由 Cloudflare 托管', { exact: true }).count() === 0, 'The redundant Cloudflare hosting badge is absent.');
   assert(await page.getByRole('button', { name: '发布状态', exact: true }).count() === 0, 'The standalone deployment page is not present.');
+  const optionRows = page.locator('.deployment-options .option-row');
+  const optionHeadingBox = await page.locator('.deployment-options .panel__heading').boundingBox();
+  const firstOptionBox = await optionRows.nth(0).boundingBox();
+  const secondOptionBox = await optionRows.nth(1).boundingBox();
+  assert(Boolean(optionHeadingBox && firstOptionBox && firstOptionBox.y - (optionHeadingBox.y + optionHeadingBox.height) >= 16), 'Access settings have spacing below the heading.');
+  assert(Boolean(firstOptionBox && secondOptionBox && secondOptionBox.y - (firstOptionBox.y + firstOptionBox.height) >= 16), 'Access setting cards have visible spacing.');
   const dashboardMetrics = await layoutMetrics();
   assert(dashboardMetrics.bodyWidth <= dashboardMetrics.viewportWidth + 1, 'Desktop dashboard has no horizontal overflow.');
   await page.screenshot({ path: screenshotPath('dashboard.png'), fullPage: false });
 
+  const draftSaved = page.waitForResponse((response) => (
+    response.url().endsWith('/api/configuration/draft') && response.request().method() === 'POST'
+  ));
   await page.getByRole('button', { name: /添加服务/ }).click();
   await page.getByLabel('第 1 个服务名').fill('qa-api');
   await page.getByLabel('第 1 个服务域名').fill('qa-api.example.com');
@@ -247,10 +309,13 @@ try {
   await page.getByRole('button', { name: '隐藏密码', exact: true }).click();
   assert(await passwordInput.getAttribute('type') === 'password', 'The password visibility control hides the password again.');
   await page.screenshot({ path: screenshotPath('password-hidden.png'), fullPage: false });
+  await draftSaved;
   await page.reload({ waitUntil: 'networkidle' });
   assert(await page.getByLabel('第 1 个服务域名').inputValue() === 'qa-api.example.com', 'The browser-local draft survives reload.');
   await page.getByRole('button', { name: /检查配置/ }).click();
   await page.getByText('配置已通过服务器校验。').waitFor();
+  const toastBox = await page.locator('.toast').boundingBox();
+  assert(Boolean(toastBox && toastBox.y < 160 && toastBox.x + toastBox.width > 1380), 'Notifications appear in the upper-right corner.');
   assert(await page.getByRole('button', { name: /发布更改/ }).isEnabled(), 'A valid edit enables deployment.');
   await page.getByRole('button', { name: /发布更改/ }).click();
   await page.getByRole('heading', { name: '服务配置', exact: true }).waitFor();
@@ -296,10 +361,23 @@ try {
 
   await page.locator('.app-sidebar button').filter({ hasText: '权限与安全' }).click();
   await page.getByRole('heading', { name: '权限与安全', exact: true }).waitFor();
-  assert(await page.getByText('本地配置', { exact: true }).isVisible(), 'Local-only configuration boundary is visible.');
-  assert(await page.locator('.security-card').filter({ hasText: 'Cloudflare 连接' }).count() === 1, 'Only the Cloudflare API Token connection is present.');
+  assert(await page.getByText('持久化配置', { exact: true }).isVisible(), 'Server-side persistent configuration boundary is visible.');
+  const cloudflareCard = page.locator('.security-card').filter({
+    has: page.getByRole('heading', { name: 'Cloudflare 连接', exact: true })
+  });
+  assert(await cloudflareCard.count() === 1, 'Only the Cloudflare API Token connection is present.');
   await page.screenshot({ path: screenshotPath('security.png'), fullPage: false });
-  await page.locator('.security-card').filter({ hasText: 'Cloudflare 连接' }).getByRole('button', { name: /重新配置 API Token/ }).click();
+  const backupCard = page.locator('.security-card').filter({
+    has: page.getByRole('heading', { name: '加密备份与恢复', exact: true })
+  });
+  await backupCard.getByRole('button', { name: '恢复备份', exact: true }).click();
+  await page.getByRole('heading', { name: '恢复加密备份', exact: true }).waitFor();
+  assert(await page.getByRole('button', { name: '选择备份文件', exact: true }).isVisible(), 'Backup restore uses the styled file picker.');
+  const nativeFileInputBox = await page.locator('.dialog input[type="file"]').boundingBox();
+  assert(Boolean(nativeFileInputBox && nativeFileInputBox.width <= 1 && nativeFileInputBox.height <= 1), 'The native file input remains visually hidden behind the styled control.');
+  await page.screenshot({ path: screenshotPath('backup-restore-dialog.png'), fullPage: false });
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await cloudflareCard.getByRole('button', { name: /重新配置 API Token/ }).click();
   await page.getByRole('heading', { level: 2, name: '配置 API Token', exact: true }).waitFor();
   assert(await page.getByLabel('API Token').isVisible(), 'The API Token connection form is shown after reset.');
 
@@ -322,6 +400,11 @@ try {
   await page.getByLabel('API Token').fill('qa-cloudflare-api-token-value');
   await page.getByLabel('服务名称').fill('uglink-reconnected');
   await page.getByRole('button', { name: /验证并继续/ }).click();
+  await page.getByRole('heading', { name: '检测到已有配置', exact: true }).waitFor();
+  assert(await page.getByText('1 个已发布服务', { exact: true }).isVisible(), 'Cloud configuration import requires explicit confirmation.');
+  await page.screenshot({ path: screenshotPath('cloud-configuration-import.png'), fullPage: false });
+  await page.getByRole('button', { name: /导入配置/ }).click();
+  await page.getByRole('heading', { name: '检测到已有配置', exact: true }).waitFor({ state: 'hidden' });
   await page.getByRole('heading', { name: '服务配置', exact: true }).waitFor();
   assert((await page.getByText('uglink-reconnected').count()) > 0, 'A selected Worker target enters the production console.');
 

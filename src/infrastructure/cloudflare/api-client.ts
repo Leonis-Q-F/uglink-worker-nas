@@ -7,6 +7,7 @@ import type {
   KvNamespaceReference
 } from '../../application/console/ports';
 import type { UglinkConfig } from '../../domain/configuration/model';
+import { resolveUglinkConfig } from '../../domain/configuration/validation';
 import type { WorkerTarget } from '../../domain/deployment/model';
 import { createWorkerRuntimeBindings } from './worker-configuration';
 import {
@@ -16,6 +17,8 @@ import {
 } from './target-worker';
 
 const API_ROOT = 'https://api.cloudflare.com/client/v4';
+const CONTROL_MARKER = 'v1';
+const CONTROL_CONFIGURATION_KEY = 'uglink-control:configuration:v1';
 
 interface CloudflareMessage {
   code?: number;
@@ -52,6 +55,7 @@ interface CloudflareWorkerSettings {
     name?: string;
     type?: string;
     text?: string;
+    namespace_id?: string;
   }>;
 }
 
@@ -88,20 +92,41 @@ function apiStatus(status: number): number {
   return 502;
 }
 
-async function cloudflareEnvelope<T>(
-  path: string,
-  token: string,
-  init: RequestInit = {},
-  allowNotFound = false
-): Promise<CloudflareEnvelope<T> | undefined> {
+function cloudflareApiError<T>(status: number, body?: CloudflareEnvelope<T>): ApplicationError {
+  const detail = body?.errors
+    ?.map((error) => [error.code, error.message].filter(Boolean).join(': '))
+    .filter(Boolean)
+    .join('；');
+  const code = status === 401
+    ? 'cloudflare_token_invalid'
+    : status === 403
+      ? 'cloudflare_permission_denied'
+      : 'cloudflare_api_failed';
+  const message = status === 401
+    ? 'Cloudflare API Token 无效、已过期或已被撤销。'
+    : status === 403
+      ? 'Cloudflare API Token 无权完成该操作。'
+      : 'Cloudflare 暂时无法完成请求。';
+  return new ApplicationError(apiStatus(status), code, message, detail || `HTTP ${status}`);
+}
+
+async function cloudflareFetch(path: string, token: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
   headers.set('Authorization', `Bearer ${token}`);
   if (typeof init.body === 'string' && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
+  return fetch(`${API_ROOT}${path}`, { ...init, headers });
+}
 
-  const response = await fetch(`${API_ROOT}${path}`, { ...init, headers });
+async function cloudflareEnvelope<T>(
+  path: string,
+  token: string,
+  init: RequestInit = {},
+  allowNotFound = false
+): Promise<CloudflareEnvelope<T> | undefined> {
+  const response = await cloudflareFetch(path, token, init);
   if (allowNotFound && response.status === 404) {
     await response.body?.cancel();
     return undefined;
@@ -117,26 +142,35 @@ async function cloudflareEnvelope<T>(
     }
   }
   if (!response.ok || (body && !body.success)) {
-    const detail = body?.errors
-      ?.map((error) => [error.code, error.message].filter(Boolean).join(': '))
-      .filter(Boolean)
-      .join('；');
-    const code = response.status === 401
-      ? 'cloudflare_token_invalid'
-      : response.status === 403
-        ? 'cloudflare_permission_denied'
-        : 'cloudflare_api_failed';
-    const message = response.status === 401
-      ? 'Cloudflare API Token 无效、已过期或已被撤销。'
-      : response.status === 403
-        ? 'Cloudflare API Token 无权完成该操作。'
-        : 'Cloudflare 暂时无法完成请求。';
-    throw new ApplicationError(apiStatus(response.status), code, message, detail || `HTTP ${response.status}`);
+    throw cloudflareApiError(response.status, body);
   }
   if (!body) {
     return { success: true, result: undefined as T };
   }
   return body;
+}
+
+async function cloudflareValue(
+  path: string,
+  token: string,
+  allowNotFound = false
+): Promise<string | undefined> {
+  const response = await cloudflareFetch(path, token);
+  if (allowNotFound && response.status === 404) {
+    await response.body?.cancel();
+    return undefined;
+  }
+  const text = await response.text();
+  if (!response.ok) {
+    let body: CloudflareEnvelope<unknown> | undefined;
+    try {
+      body = JSON.parse(text) as CloudflareEnvelope<unknown>;
+    } catch {
+      body = undefined;
+    }
+    throw cloudflareApiError(response.status, body);
+  }
+  return text;
 }
 
 async function cloudflareRequest<T>(
@@ -196,6 +230,57 @@ export async function createCloudflareConnection(
   };
 }
 
+export async function loadCloudflareConfiguration(
+  accountId: string,
+  apiToken: string,
+  workerName: string
+): Promise<UglinkConfig | undefined> {
+  const settings = await cloudflareEnvelope<CloudflareWorkerSettings>(
+    `/accounts/${encodeURIComponent(accountId)}/workers/scripts/${encodeURIComponent(workerName)}/settings`,
+    apiToken,
+    {},
+    true
+  );
+  if (!settings) return undefined;
+
+  const bindings = settings.result.bindings || [];
+  const managed = bindings.some((binding) => (
+    binding.name === 'UGLINK_CONTROL_MANAGED'
+    && binding.type === 'plain_text'
+    && binding.text === CONTROL_MARKER
+  ));
+  if (!managed) {
+    throw new ApplicationError(
+      409,
+      'cloudflare_worker_name_conflict',
+      `服务名称“${workerName}”已被其他 Cloudflare 服务使用。`,
+      '请选择新的服务名称；系统不会读取或覆盖现有服务。'
+    );
+  }
+
+  const namespaceId = bindings.find((binding) => (
+    binding.name === 'UGLINK_CACHE' && binding.type === 'kv_namespace'
+  ))?.namespace_id;
+  if (!namespaceId) {
+    throw new ApplicationError(502, 'cloudflare_configuration_invalid', 'Cloudflare 服务缺少配置存储绑定。');
+  }
+
+  const stored = await cloudflareValue(
+    `/accounts/${encodeURIComponent(accountId)}/storage/kv/namespaces/${encodeURIComponent(namespaceId)}`
+      + `/values/${encodeURIComponent(CONTROL_CONFIGURATION_KEY)}`,
+    apiToken,
+    true
+  );
+  if (!stored) {
+    throw new ApplicationError(502, 'cloudflare_configuration_invalid', 'Cloudflare 服务没有可恢复的配置。');
+  }
+  try {
+    return resolveUglinkConfig(JSON.parse(stored) as unknown);
+  } catch {
+    throw new ApplicationError(502, 'cloudflare_configuration_invalid', 'Cloudflare 服务配置无效。');
+  }
+}
+
 export async function hasWorkerPassword(
   apiToken: string,
   target: WorkerTarget
@@ -225,7 +310,7 @@ export async function assertWorkerOwnership(
   const managed = bindings.some((binding) => (
     binding.name === 'UGLINK_CONTROL_MANAGED'
     && binding.type === 'plain_text'
-    && binding.text === 'v1'
+    && binding.text === CONTROL_MARKER
   ));
   if (managed) return;
 
@@ -234,6 +319,24 @@ export async function assertWorkerOwnership(
     'cloudflare_worker_name_conflict',
     `服务名称“${target.workerName}”已被其他 Cloudflare 服务使用。`,
     '请选择新的服务名称；系统不会覆盖现有服务。'
+  );
+}
+
+export async function saveCloudflareConfiguration(
+  apiToken: string,
+  target: WorkerTarget,
+  config: UglinkConfig,
+  namespace: KvNamespaceReference
+): Promise<void> {
+  await cloudflareRequest(
+    `/accounts/${encodeURIComponent(target.accountId)}/storage/kv/namespaces/${encodeURIComponent(namespace.id)}`
+      + `/values/${encodeURIComponent(CONTROL_CONFIGURATION_KEY)}`,
+    apiToken,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    }
   );
 }
 
@@ -267,7 +370,7 @@ export async function uploadProxyWorker(
     bindings: [
       { name: 'UGLINK_CACHE', type: 'kv_namespace', namespace_id: namespace.id },
       ...Object.entries(runtimeBindings).map(([name, text]) => ({ name, type: 'plain_text', text })),
-      { name: 'UGLINK_CONTROL_MANAGED', type: 'plain_text', text: 'v1' }
+      { name: 'UGLINK_CONTROL_MANAGED', type: 'plain_text', text: CONTROL_MARKER }
     ],
     compatibility_date: TARGET_COMPATIBILITY_DATE,
     compatibility_flags: ['nodejs_compat'],
@@ -391,7 +494,8 @@ export function cloudflareDashboardUrl(target: WorkerTarget): string {
 }
 
 export const cloudflareConnectionProvider: CloudflareConnectionProvider = {
-  connect: createCloudflareConnection
+  connect: createCloudflareConnection,
+  loadDeployedConfiguration: loadCloudflareConfiguration
 };
 
 export function createCloudflareDeploymentProvider(apiToken: string): CloudflareDeploymentProvider {
@@ -399,6 +503,9 @@ export function createCloudflareDeploymentProvider(apiToken: string): Cloudflare
     assertWorkerOwnership: (target) => assertWorkerOwnership(apiToken, target),
     hasWorkerPassword: (target) => hasWorkerPassword(apiToken, target),
     ensureKvNamespace: (target) => ensureKvNamespace(apiToken, target),
+    saveConfiguration: (target, config, namespace) => (
+      saveCloudflareConfiguration(apiToken, target, config, namespace)
+    ),
     async uploadWorker(target, config, namespace) {
       const result = await uploadProxyWorker(apiToken, target, config, namespace);
       return { ...(result.deployment_id ? { deploymentId: result.deployment_id } : {}) };

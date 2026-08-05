@@ -169,6 +169,11 @@ describe('production Cloudflare deployment', () => {
       if (url.endsWith('/workers/scripts/uglink-test') && method === 'PUT') {
         return envelope({ id: 'uglink-test', deployment_id: 'deployment-id' });
       }
+      if (url.endsWith(
+        '/storage/kv/namespaces/namespace-id-123456/values/uglink-control%3Aconfiguration%3Av1'
+      ) && method === 'PUT') {
+        return envelope({});
+      }
       if (url.endsWith('/workers/domains') && method === 'GET') {
         return envelope([{
           id: 'old-domain-id',
@@ -226,6 +231,19 @@ describe('production Cloudflare deployment', () => {
       type: 'plain_text',
       text: 'v1'
     });
+    const cloudConfiguration = calls.find((call) => (
+      call.url.endsWith('/values/uglink-control%3Aconfiguration%3Av1')
+      && call.method === 'PUT'
+    ));
+    expect(cloudConfiguration?.body).toBe(JSON.stringify(configuredConfig()));
+
+    const uploadIndex = calls.findIndex((call) => (
+      call.url.endsWith('/workers/scripts/uglink-test') && call.method === 'PUT'
+    ));
+    const configurationIndex = calls.findIndex((call) => (
+      call.url.endsWith('/values/uglink-control%3Aconfiguration%3Av1') && call.method === 'PUT'
+    ));
+    expect(configurationIndex).toBeGreaterThan(uploadIndex);
 
     const attachIndex = calls.findIndex((call) => call.url.endsWith('/workers/domains') && call.method === 'PUT');
     const detachIndex = calls.findIndex((call) => call.url.endsWith('/workers/domains/old-domain-id') && call.method === 'DELETE');
@@ -251,6 +269,9 @@ describe('production Cloudflare deployment', () => {
       if (url.endsWith('/workers/scripts/uglink-test') && method === 'PUT') {
         uploadCount += 1;
         return envelope({ deployment_id: `deployment-${uploadCount}` });
+      }
+      if (url.endsWith('/values/uglink-control%3Aconfiguration%3Av1') && method === 'PUT') {
+        return envelope({});
       }
       if (url.endsWith('/workers/domains') && method === 'GET') return envelope([]);
       if (url.endsWith('/workers/domains') && method === 'PUT') return envelope({ id: 'domain-id' });

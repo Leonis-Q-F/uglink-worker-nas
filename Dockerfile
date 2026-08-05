@@ -38,7 +38,12 @@ COPY --from=build --chown=node:node /app/dist/client ./dist/client
 COPY --from=build --chown=node:node /app/dist/uglink_console/index.mjs ./dist/uglink_console/index.mjs
 COPY --chown=node:node docker ./docker
 
-RUN mkdir -p /data && chown node:node /data
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && test -s /etc/ssl/certs/ca-certificates.crt \
+    && mkdir -p /data \
+    && chown node:node /data
 
 USER node
 VOLUME ["/data"]

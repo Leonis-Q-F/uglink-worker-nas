@@ -160,7 +160,7 @@ export function ConnectScreen({ bootstrap }: ConnectScreenProps) {
                       spellCheck={false}
                       maxLength={63}
                     />
-                    <small>用于创建或更新对应的 Cloudflare Worker。</small>
+                    <small>同名 UGLINK Worker 存在时，会提示导入其已发布配置。</small>
                   </label>
                   <label className="field field--wide">
                     <span>API Token</span>

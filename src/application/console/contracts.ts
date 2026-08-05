@@ -22,6 +22,9 @@ export interface BootstrapResponse {
   };
   target?: PublicWorkerTarget;
   configuration?: PersistedConfigurationState;
+  cloudConfiguration?: {
+    serviceCount: number;
+  };
 }
 
 export interface DeployRequest {
