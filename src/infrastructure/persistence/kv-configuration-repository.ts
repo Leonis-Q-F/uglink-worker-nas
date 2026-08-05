@@ -3,7 +3,7 @@ import type { PersistedConfigurationState } from '../../application/console/cont
 import type { WorkerTarget } from '../../domain/deployment/model';
 
 function storageKey(target: WorkerTarget): string {
-  return `configuration:v1:${target.accountId}:${target.workerName}`;
+  return `configuration:v2:${target.accountId}:${target.workerName}`;
 }
 
 export function createKvConfigurationRepository(

@@ -7,7 +7,7 @@
   "workers_dev": true,
   "preview_urls": false,
   "vars": {
-    "BASE_URL": "",
+    "UGLINK_ID": "",
     "USERNAME": "",
     "SERVICE_MAP": "{}",
     "SETUP_MODE": "true",

@@ -1,6 +1,7 @@
 export interface ProxySession {
   cookie: string;
   origin: string;
+  loginOrigin: string;
 }
 
 export type ProxyFailureCode =

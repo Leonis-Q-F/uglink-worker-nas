@@ -6,7 +6,7 @@ import { serializeConfig, validateUglinkConfig } from '../../src/domain/configur
 function configuredConfig(): UglinkConfig {
   const config = defaultConfig();
   config.uglink = {
-    baseUrl: 'https://device.example.test',
+    id: 'test-device',
     username: 'test-user'
   };
   config.services = [{
@@ -38,12 +38,12 @@ describe('validateUglinkConfig', () => {
     expect(result.checks.find((check) => check.id === 'unique-services')?.level).toBe('error');
   });
 
-  it('rejects non-HTTPS upstream URLs and credentials in URLs', () => {
+  it('rejects URLs in place of a UGREENlink ID', () => {
     const config = configuredConfig();
-    config.uglink.baseUrl = 'http://user:password@example.test/?token=unsafe';
+    config.uglink.id = 'https://device.example.test';
     const result = validateUglinkConfig(config);
     expect(result.valid).toBe(false);
-    expect(result.checks.find((check) => check.id === 'upstream')?.level).toBe('error');
+    expect(result.checks.find((check) => check.id === 'uglink-id')?.level).toBe('error');
   });
 
   it('serializes with stable indentation and a trailing newline', () => {

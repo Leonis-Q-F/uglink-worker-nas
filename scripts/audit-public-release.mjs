@@ -73,7 +73,9 @@ function scanText(findings, path, contents) {
     '真实绿联远程地址',
     (match) => {
       const hostname = String(match[1]).toLowerCase();
-      return !hostname.startsWith('example.') && !hostname.includes('.example.ug.link');
+      return hostname !== 'www.ug.link'
+        && !hostname.startsWith('example.')
+        && !hostname.includes('.example.ug.link');
     }
   );
   addMatches(

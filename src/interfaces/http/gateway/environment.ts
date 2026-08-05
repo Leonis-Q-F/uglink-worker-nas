@@ -1,5 +1,5 @@
 export interface GatewayWorkerEnv {
-  BASE_URL: string;
+  UGLINK_ID: string;
   USERNAME: string;
   PASSWORD: string;
   SERVICE_MAP: string;

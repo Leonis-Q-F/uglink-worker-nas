@@ -18,7 +18,7 @@ import {
 
 const API_ROOT = 'https://api.cloudflare.com/client/v4';
 const CONTROL_MARKER = 'v1';
-const CONTROL_CONFIGURATION_KEY = 'uglink-control:configuration:v1';
+const CONTROL_CONFIGURATION_KEY = 'uglink-control:configuration:v2';
 
 interface CloudflareMessage {
   code?: number;
@@ -271,9 +271,7 @@ export async function loadCloudflareConfiguration(
     apiToken,
     true
   );
-  if (!stored) {
-    throw new ApplicationError(502, 'cloudflare_configuration_invalid', 'Cloudflare 服务没有可恢复的配置。');
-  }
+  if (!stored) return undefined;
   try {
     return resolveUglinkConfig(JSON.parse(stored) as unknown);
   } catch {

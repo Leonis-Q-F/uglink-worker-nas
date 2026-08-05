@@ -15,7 +15,7 @@ const logger = {
 export default {
   fetch(request: Request, env: GatewayWorkerEnv): Promise<Response> {
     const sessions = createUgreenSessionService({
-      baseUrl: env.BASE_URL,
+      uglinkId: env.UGLINK_ID,
       username: env.USERNAME,
       password: env.PASSWORD,
       sessionNamespace: env.SESSION_NAMESPACE,
@@ -26,7 +26,6 @@ export default {
       }
     });
     return handleGatewayRequest(request, {
-      baseUrl: env.BASE_URL,
       serviceMap: env.SERVICE_MAP,
       setupMode: env.SETUP_MODE === 'true'
     }, {

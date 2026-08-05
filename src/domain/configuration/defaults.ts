@@ -3,9 +3,9 @@ import type { UglinkConfig } from './model';
 export function defaultConfig(): UglinkConfig {
   return {
     $schema: './uglink.config.schema.json',
-    version: 1,
+    version: 2,
     uglink: {
-      baseUrl: '',
+      id: '',
       username: ''
     },
     services: [],

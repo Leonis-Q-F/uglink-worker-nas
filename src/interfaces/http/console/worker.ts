@@ -162,23 +162,6 @@ async function route(request: Request, env: ConsoleWorkerEnv, session: SessionHa
     return json({ ok: true });
   }
 
-  if (request.method === 'POST' && pathname === '/api/configuration/import') {
-    assertSameOrigin(request);
-    assertCsrf(request, session);
-    const target = session.data.target;
-    if (!target) throw new ApplicationError(401, 'cloudflare_not_connected', '请先配置 Cloudflare API Token。');
-    const body = await readJson<ConfigurationImportRequest>(request);
-    const service = createConfigurationService(createKvConfigurationRepository(env.CONSOLE_SESSIONS, target));
-    return json(await service.importAsDraft(body.config));
-  }
-
-  if (request.method === 'GET' && pathname === '/api/configuration/export') {
-    const target = session.data.target;
-    if (!target) throw new ApplicationError(401, 'cloudflare_not_connected', '请先配置 Cloudflare API Token。');
-    const service = createConfigurationService(createKvConfigurationRepository(env.CONSOLE_SESSIONS, target));
-    return json(await service.exportCurrent());
-  }
-
   if (request.method === 'POST' && pathname === '/api/deploy') {
     assertSameOrigin(request);
     assertCsrf(request, session);

@@ -21,7 +21,7 @@ function envelope(result: unknown, status = 200): Response {
 function configuredConfig(): UglinkConfig {
   const config = defaultConfig();
   config.uglink = {
-    baseUrl: 'https://device.example.test',
+    id: 'test-device',
     username: 'test-user'
   };
   config.services = [{
@@ -156,7 +156,7 @@ describe('production Cloudflare deployment', () => {
         return envelope({
           bindings: [
             { name: 'UGLINK_CONTROL_MANAGED', type: 'plain_text', text: 'v1' },
-            { name: 'BASE_URL', type: 'plain_text', text: 'https://device.example.test' },
+            { name: 'UGLINK_ID', type: 'plain_text', text: 'test-device' },
             { name: 'USERNAME', type: 'plain_text', text: 'test-user' },
             { name: 'SERVICE_MAP', type: 'plain_text', text: '{}' },
             { name: 'UGLINK_CACHE', type: 'kv_namespace' }
@@ -170,7 +170,7 @@ describe('production Cloudflare deployment', () => {
         return envelope({ id: 'uglink-test', deployment_id: 'deployment-id' });
       }
       if (url.endsWith(
-        '/storage/kv/namespaces/namespace-id-123456/values/uglink-control%3Aconfiguration%3Av1'
+        '/storage/kv/namespaces/namespace-id-123456/values/uglink-control%3Aconfiguration%3Av2'
       ) && method === 'PUT') {
         return envelope({});
       }
@@ -231,17 +231,31 @@ describe('production Cloudflare deployment', () => {
       type: 'plain_text',
       text: 'v1'
     });
+    expect(metadata.bindings).toContainEqual({
+      name: 'UGLINK_ID',
+      type: 'plain_text',
+      text: 'test-device'
+    });
+    expect(metadata.bindings).toContainEqual({
+      name: 'USERNAME',
+      type: 'plain_text',
+      text: 'test-user'
+    });
+    expect(metadata.bindings.some((binding) => binding.name === 'BASE_URL')).toBe(false);
+    expect(metadata.bindings.some((binding) => binding.name === 'PASSWORD')).toBe(false);
     const cloudConfiguration = calls.find((call) => (
-      call.url.endsWith('/values/uglink-control%3Aconfiguration%3Av1')
+      call.url.endsWith('/values/uglink-control%3Aconfiguration%3Av2')
       && call.method === 'PUT'
     ));
     expect(cloudConfiguration?.body).toBe(JSON.stringify(configuredConfig()));
+    expect(String(cloudConfiguration?.body)).not.toContain('password');
+    expect(String(cloudConfiguration?.body)).not.toContain('relayDomain');
 
     const uploadIndex = calls.findIndex((call) => (
       call.url.endsWith('/workers/scripts/uglink-test') && call.method === 'PUT'
     ));
     const configurationIndex = calls.findIndex((call) => (
-      call.url.endsWith('/values/uglink-control%3Aconfiguration%3Av1') && call.method === 'PUT'
+      call.url.endsWith('/values/uglink-control%3Aconfiguration%3Av2') && call.method === 'PUT'
     ));
     expect(configurationIndex).toBeGreaterThan(uploadIndex);
 
@@ -270,7 +284,7 @@ describe('production Cloudflare deployment', () => {
         uploadCount += 1;
         return envelope({ deployment_id: `deployment-${uploadCount}` });
       }
-      if (url.endsWith('/values/uglink-control%3Aconfiguration%3Av1') && method === 'PUT') {
+      if (url.endsWith('/values/uglink-control%3Aconfiguration%3Av2') && method === 'PUT') {
         return envelope({});
       }
       if (url.endsWith('/workers/domains') && method === 'GET') return envelope([]);

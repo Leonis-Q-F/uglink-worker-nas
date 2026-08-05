@@ -13,7 +13,7 @@ const API_TOKEN = 'cloudflare-api-token-used-only-for-testing';
 function deployedConfig(): UglinkConfig {
   const config = defaultConfig();
   config.uglink = {
-    baseUrl: 'https://device.example.test',
+    id: 'test-device',
     username: 'test-user'
   };
   config.services = [{
@@ -173,7 +173,7 @@ describe('Cloudflare API Token connection', () => {
         });
       }
       if (url.endsWith(
-        `/accounts/${ACCOUNT_ID}/storage/kv/namespaces/namespace-id/values/uglink-control%3Aconfiguration%3Av1`
+        `/accounts/${ACCOUNT_ID}/storage/kv/namespaces/namespace-id/values/uglink-control%3Aconfiguration%3Av2`
       )) {
         return new Response(JSON.stringify(cloudConfig), {
           headers: { 'Content-Type': 'application/json' }
@@ -244,7 +244,7 @@ describe('Cloudflare API Token connection', () => {
     expect(body.error.code).toBe('cloudflare_worker_name_conflict');
   });
 
-  it('does not infer configuration when the cloud configuration record is missing', async () => {
+  it('connects without inferring configuration when the current cloud record is missing', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith(`/accounts/${ACCOUNT_ID}`)) {
@@ -260,17 +260,18 @@ describe('Cloudflare API Token connection', () => {
           ]
         });
       }
-      if (url.endsWith('/values/uglink-control%3Aconfiguration%3Av1')) return envelope(null, 404);
+      if (url.endsWith('/values/uglink-control%3Aconfiguration%3Av2')) return envelope(null, 404);
       throw new Error(`Unexpected fetch: ${url}`);
     }));
 
     const { env } = environment();
     const initial = await openSession(env);
     const response = await worker.fetch(connectionRequest(initial.cookie, initial.bootstrap.csrfToken), env);
-    const body = await response.json() as { error: { code: string } };
+    const body = await response.json() as BootstrapResponse;
 
-    expect(response.status).toBe(502);
-    expect(body.error.code).toBe('cloudflare_configuration_invalid');
+    expect(response.status).toBe(200);
+    expect(body.cloudConfiguration).toBeUndefined();
+    expect(body.configuration?.deployed).toEqual(defaultConfig());
   });
 
   it('rejects a token that cannot access both Workers and Workers KV', async () => {

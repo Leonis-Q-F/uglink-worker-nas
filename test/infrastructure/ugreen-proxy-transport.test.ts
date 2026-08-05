@@ -18,7 +18,8 @@ test('buildProxyHeaders preserves application cookies and replaces spoofed proxy
 
   const headers = buildProxyHeaders(request, {
     cookie: 'ugreen-proxy-token=trusted',
-    origin: 'https://proxy.example.net'
+    origin: 'https://proxy.example.net',
+    loginOrigin: 'https://device.example.test'
   });
 
   assert.equal(headers.get('cookie'), 'app_session=abc; ugreen-proxy-token=trusted');
@@ -35,11 +36,16 @@ test('isUgreenLoginRedirect recognizes only the UGREEN account login redirect', 
       Location: 'http://device.example.test/desktop/#/login/account'
     }
   });
-  assert.equal(isUgreenLoginRedirect(expired, 'https://device.example.test/'), true);
+  const session = {
+    cookie: 'ugreen-proxy-token=trusted',
+    origin: 'https://proxy.example.test',
+    loginOrigin: 'https://device.example.test'
+  };
+  assert.equal(isUgreenLoginRedirect(expired, session), true);
 
   for (const status of [401, 403]) {
     assert.equal(
-      isUgreenLoginRedirect(new Response(null, { status }), 'https://device.example.test/'),
+      isUgreenLoginRedirect(new Response(null, { status }), session),
       false
     );
   }
@@ -49,7 +55,7 @@ test('isUgreenLoginRedirect recognizes only the UGREEN account login redirect', 
     headers: { Location: '/sign-in' }
   });
   assert.equal(
-    isUgreenLoginRedirect(applicationRedirect, 'https://device.example.test/'),
+    isUgreenLoginRedirect(applicationRedirect, session),
     false
   );
 
@@ -58,7 +64,7 @@ test('isUgreenLoginRedirect recognizes only the UGREEN account login redirect', 
     headers: { Location: 'https://accounts.example.net/desktop/#/login/account' }
   });
   assert.equal(
-    isUgreenLoginRedirect(foreignRedirect, 'https://device.example.test/'),
+    isUgreenLoginRedirect(foreignRedirect, session),
     false
   );
 });
@@ -84,7 +90,8 @@ test('proxyRequest preserves the incoming path and exposes redirects to the Work
     new Request('https://service.example.com/v1/models?limit=10'),
     {
       cookie: 'ugreen-proxy-token=trusted',
-      origin: 'https://proxy.example.test'
+      origin: 'https://proxy.example.test',
+      loginOrigin: 'https://device.example.test'
     }
   );
 

@@ -248,7 +248,7 @@ export function createDeploymentService(dependencies: DeploymentServiceDependenc
     await jobs.save(job);
 
     try {
-      advance(job, 'validating', '绿联云地址和服务配置均有效。');
+      advance(job, 'validating', 'UGREENlink ID 和服务配置均有效。');
       await jobs.save(job);
       await provider.assertWorkerOwnership(target);
 

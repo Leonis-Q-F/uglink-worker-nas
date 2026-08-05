@@ -2,6 +2,7 @@ import type { ResolvedUglinkConfig, UglinkConfig } from './model';
 
 const SERVICE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/u;
 const HOSTNAME = /^(?=.{1,253}$)(?!-)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/iu;
+const UGLINK_ID = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 
 export type CheckLevel = 'pass' | 'warning' | 'error' | 'pending';
 
@@ -56,28 +57,13 @@ export function normalizeHostname(value: string): string {
   return hostname;
 }
 
-export function normalizeBaseUrl(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return '';
-
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
-    throw new Error('uglink.baseUrl 必须是有效的 URL');
+export function normalizeUglinkId(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return '';
+  if (!UGLINK_ID.test(normalized)) {
+    throw new Error('uglink.id 必须是有效的 UGREENlink ID');
   }
-
-  if (
-    parsed.protocol !== 'https:'
-    || parsed.username
-    || parsed.password
-    || parsed.pathname !== '/'
-    || parsed.search
-    || parsed.hash
-  ) {
-    throw new Error('uglink.baseUrl 必须是不含凭据、路径、查询参数和片段的 HTTPS 源地址');
-  }
-  return parsed.origin;
+  return normalized;
 }
 
 function shapeErrors(value: unknown): string[] {
@@ -87,15 +73,15 @@ function shapeErrors(value: unknown): string[] {
   const rootExtra = unexpectedKeys(value, ['$schema', 'version', 'uglink', 'services', 'deployment']);
   if (rootExtra.length) errors.push(`配置根节点包含不支持的字段：${rootExtra.join(', ')}`);
   if (value.$schema !== undefined && typeof value.$schema !== 'string') errors.push('$schema 必须是字符串');
-  if (value.version !== 1) errors.push('version 必须为 1');
+  if (value.version !== 2) errors.push('version 必须为 2');
 
   if (!isRecord(value.uglink)) {
     errors.push('uglink 必须是对象');
   } else {
-    const extra = unexpectedKeys(value.uglink, ['baseUrl', 'username']);
+    const extra = unexpectedKeys(value.uglink, ['id', 'username']);
     if (extra.length) errors.push(`uglink 包含不支持的字段：${extra.join(', ')}`);
-    if (typeof value.uglink.baseUrl !== 'string' || value.uglink.baseUrl.length > 2048) {
-      errors.push('uglink.baseUrl 必须是不超过 2048 个字符的字符串');
+    if (typeof value.uglink.id !== 'string' || value.uglink.id.length > 63) {
+      errors.push('uglink.id 必须是不超过 63 个字符的字符串');
     }
     if (typeof value.uglink.username !== 'string' || value.uglink.username.length > 128) {
       errors.push('uglink.username 必须是不超过 128 个字符的字符串');
@@ -175,9 +161,9 @@ export function resolveUglinkConfig(value: unknown): ResolvedUglinkConfig {
   const config = value as UglinkConfig;
   issues.push(...duplicateErrors(config));
 
-  let baseUrl = '';
+  let id = '';
   try {
-    baseUrl = normalizeBaseUrl(config.uglink.baseUrl);
+    id = normalizeUglinkId(config.uglink.id);
   } catch (error) {
     issues.push(error instanceof Error ? error.message : String(error));
   }
@@ -189,15 +175,15 @@ export function resolveUglinkConfig(value: unknown): ResolvedUglinkConfig {
     enabled: service.enabled !== false
   }));
   const activeServices = services.filter((service) => service.enabled);
-  if (activeServices.length > 0 && (!baseUrl || !username)) {
-    issues.push('启用服务时必须填写 uglink.baseUrl 和 uglink.username');
+  if (activeServices.length > 0 && (!id || !username)) {
+    issues.push('启用服务时必须填写 uglink.id 和 uglink.username');
   }
   if (issues.length) throw new ConfigurationError(issues);
 
   return {
     ...('$schema' in config && config.$schema ? { $schema: config.$schema } : {}),
-    version: 1,
-    uglink: { baseUrl, username },
+    version: 2,
+    uglink: { id, username },
     services,
     deployment: {
       workersDev: config.deployment?.workersDev ?? activeServices.length === 0,
@@ -219,19 +205,19 @@ export function validateUglinkConfig(value: unknown): ValidationResponse {
   if (!schemaValid) return { valid: false, checks };
 
   const config = value as UglinkConfig;
-  let upstreamValid = config.uglink.baseUrl === config.uglink.baseUrl.trim();
+  let uglinkIdValid = config.uglink.id === config.uglink.id.trim();
   try {
-    upstreamValid = upstreamValid && normalizeBaseUrl(config.uglink.baseUrl).length > 0;
+    uglinkIdValid = uglinkIdValid && normalizeUglinkId(config.uglink.id).length > 0;
   } catch {
-    upstreamValid = false;
+    uglinkIdValid = false;
   }
   checks.push({
-    id: 'upstream',
-    label: '绿联云地址',
-    detail: upstreamValid
-      ? '使用 HTTPS，且地址中不包含凭据、路径或查询参数。'
-      : '请输入不含凭据、路径、查询参数或片段的 HTTPS 源地址。',
-    level: upstreamValid ? 'pass' : 'error'
+    id: 'uglink-id',
+    label: 'UGREENlink ID',
+    detail: uglinkIdValid
+      ? 'ID 格式有效，运行时将自动发现当前中继地址。'
+      : '请输入分享地址末尾的 UGREENlink ID，只能包含字母、数字和连字符。',
+    level: uglinkIdValid ? 'pass' : 'error'
   });
 
   const duplicates = duplicateErrors(config);

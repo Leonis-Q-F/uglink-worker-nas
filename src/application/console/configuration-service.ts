@@ -9,7 +9,7 @@ import {
 import type { PersistedConfigurationState } from './contracts';
 import type { ConfigurationRepository } from './ports';
 
-const MAX_BASE_URL_LENGTH = 2_048;
+const MAX_UGLINK_ID_LENGTH = 63;
 const MAX_USERNAME_LENGTH = 128;
 const MAX_SERVICE_NAME_LENGTH = 64;
 const MAX_HOSTNAME_LENGTH = 253;
@@ -52,7 +52,7 @@ function draftService(value: unknown, index: number): UglinkService {
 }
 
 export function normalizeDraftConfiguration(value: unknown): UglinkConfig {
-  if (!isRecord(value) || value.version !== 1 || !isRecord(value.uglink)) {
+  if (!isRecord(value) || value.version !== 2 || !isRecord(value.uglink)) {
     throw new ApplicationError(400, 'invalid_config', '配置结构无效。');
   }
   if (!Array.isArray(value.services) || value.services.length > MAX_SERVICES) {
@@ -68,9 +68,9 @@ export function normalizeDraftConfiguration(value: unknown): UglinkConfig {
     ...(typeof value.$schema === 'string' && value.$schema.length <= 256
       ? { $schema: value.$schema }
       : {}),
-    version: 1,
+    version: 2,
     uglink: {
-      baseUrl: boundedString(value.uglink.baseUrl, 'uglink.baseUrl', MAX_BASE_URL_LENGTH),
+      id: boundedString(value.uglink.id, 'uglink.id', MAX_UGLINK_ID_LENGTH),
       username: boundedString(value.uglink.username, 'uglink.username', MAX_USERNAME_LENGTH)
     },
     services: value.services.map(draftService),
@@ -124,14 +124,6 @@ export function createConfigurationService(repository: ConfigurationRepository) 
     return next;
   }
 
-  async function importAsDraft(value: unknown): Promise<PersistedConfigurationState> {
-    const draft = importConfiguration(value);
-    const current = await repository.read();
-    const next = state(current?.deployed || defaultConfig(), draft);
-    await repository.write(next);
-    return next;
-  }
-
   async function replace(value: PersistedConfigurationState): Promise<PersistedConfigurationState> {
     const deployed = normalizeDraftConfiguration(value.deployed);
     const draft = value.draft === undefined ? undefined : normalizeDraftConfiguration(value.draft);
@@ -140,14 +132,7 @@ export function createConfigurationService(repository: ConfigurationRepository) 
     return next;
   }
 
-  async function exportCurrent(): Promise<UglinkConfig> {
-    const current = await repository.read();
-    return current?.draft || current?.deployed || defaultConfig();
-  }
-
   return {
-    exportCurrent,
-    importAsDraft,
     read,
     replace,
     saveDeployed,

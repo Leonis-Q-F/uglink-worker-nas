@@ -4,7 +4,7 @@ import type { ProxySession } from '../../domain/proxy/model';
 const PROXY_COOKIE_NAME = 'ugreen-proxy-token';
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
-export function isUgreenLoginRedirect(response: Response, baseUrl: string): boolean {
+export function isUgreenLoginRedirect(response: Response, session: ProxySession): boolean {
   if (!REDIRECT_STATUSES.has(response.status)) {
     return false;
   }
@@ -15,8 +15,8 @@ export function isUgreenLoginRedirect(response: Response, baseUrl: string): bool
   }
 
   try {
-    const loginUrl = new URL(location, baseUrl);
-    const deviceUrl = new URL(baseUrl);
+    const loginUrl = new URL(location, session.loginOrigin);
+    const deviceUrl = new URL(session.loginOrigin);
     return (
       loginUrl.hostname === deviceUrl.hostname
       && loginUrl.pathname.startsWith('/desktop/')

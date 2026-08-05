@@ -165,10 +165,10 @@ Gateway Worker 的核心配置，由控制台自动生成：
 
 ```jsonc
 {
-  "version": 1,
+  "version": 2,
   "uglink": {
-    "baseUrl": "https://your-uglink-url.example.com",
-    "username": "your-username"
+    "id": "your-uglink-id",
+    "username": "your-nas-login-username"
   },
   "services": [
     {
@@ -185,6 +185,8 @@ Gateway Worker 的核心配置，由控制台自动生成：
 }
 ```
 
+`uglink.id` 是 `https://ug.link/<ID>` 末尾的 UGREENlink ID，与 NAS 登录用户名彼此独立。Gateway 在创建代理会话时通过绿联发现接口解析当前中继地址，结果缓存 5 分钟；缓存地址失效或代理连接失败时会强制重新发现一次。NAS 密码只进入目标 Worker Secret，不属于配置文件。
+
 ### 环境变量
 
 | 变量 | 说明 | 默认值 |
@@ -199,8 +201,7 @@ Gateway Worker 的核心配置，由控制台自动生成：
 - `uglink-data` 卷保存自动生成的会话加密密钥、本地 KV、加密 API Token、服务配置与诊断记录。
 - 已发布的非秘密配置同步到目标 Worker 的 `UGLINK_CACHE` KV；API Token、NAS 密码和本地草稿不会同步。
 - 更新时使用 `docker compose pull && docker compose up -d`；不要执行 `docker compose down --volumes` 或手动删除 `uglink-data`。
-- 配置导出文件不包含 API Token 或密码，可用于迁移服务映射。
-- 加密备份包含 Cloudflare 连接、服务配置和诊断记录，需要至少 12 个字符的独立备份密码。
+- 加密备份包含 Cloudflare 连接、UGREENlink ID、NAS 登录用户名、服务配置和诊断记录，需要至少 12 个字符的独立备份密码。
 - NAS 登录密码由 Cloudflare Worker Secret 保存，Cloudflare 不允许读取 Secret 明文，因此不会进入备份文件。
 - 完整灾难恢复应停止控制台后成组备份整个卷；卷备份和应用导出的加密备份都应按敏感数据保管。
 

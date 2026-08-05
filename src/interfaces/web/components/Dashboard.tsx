@@ -359,18 +359,17 @@ function ConfigEditor({
         </div>
         <div className="form-grid">
           <label className="field field--wide">
-            <span>绿联云地址 <em>BASE_URL</em></span>
+            <span>UGREENlink ID <em>UGLINK_ID</em></span>
             <input
-              value={config.uglink.baseUrl}
+              value={config.uglink.id}
               onChange={(event) => onChange({
                 ...config,
-                uglink: { ...config.uglink, baseUrl: event.target.value }
+                uglink: { ...config.uglink, id: event.target.value }
               })}
-              placeholder="https://example.cn79.ug.link"
-              inputMode="url"
-              autoComplete="url"
+              placeholder="例如 northedge"
+              autoComplete="off"
             />
-            <small>绿联云远程访问地址，必须使用 HTTPS。</small>
+            <small>即 https://ug.link/ 后的设备 ID；运行时会自动发现当前中继地址。</small>
           </label>
           <label className="field">
             <span>登录用户名 <em>USERNAME</em></span>
@@ -601,9 +600,7 @@ interface SecurityPageProps {
   config: UglinkConfig;
   resetting: boolean;
   onReset: () => void;
-  onConfigurationImported: (snapshot: PersistedConfigurationState) => void;
   onRestored: (bootstrap: BootstrapResponse) => void;
-  onNotice: (type: 'success' | 'error', message: string) => void;
 }
 
 function SecurityPage({
@@ -611,9 +608,7 @@ function SecurityPage({
   config,
   resetting,
   onReset,
-  onConfigurationImported,
-  onRestored,
-  onNotice
+  onRestored
 }: SecurityPageProps) {
   return (
     <div className="section-page">
@@ -633,7 +628,7 @@ function SecurityPage({
         </section>
         <section className="panel security-card">
           <span className="security-card__icon"><HardDrive size={21} /></span>
-          <div><h2>持久化配置</h2><p>NAS 地址、登录用户名与服务映射保存在服务器数据目录，不再依赖当前浏览器。</p></div>
+          <div><h2>持久化配置</h2><p>UGREENlink ID、NAS 登录用户名与服务映射保存在服务器数据目录，不再依赖当前浏览器。</p></div>
           <span className="status-chip status-chip--success"><Check size={12} /> 已安全保存</span>
         </section>
         <section className="panel security-card security-card--wide">
@@ -647,9 +642,7 @@ function SecurityPage({
         <DataManagement
           csrfToken={bootstrap.csrfToken}
           config={config}
-          onConfigurationImported={onConfigurationImported}
           onRestored={onRestored}
-          onNotice={onNotice}
         />
       </div>
     </div>
@@ -1014,13 +1007,7 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
               config={config}
               resetting={resettingConnection}
               onReset={() => void resetConnection()}
-              onConfigurationImported={(snapshot) => {
-                setSavedConfig(snapshot.deployed);
-                setConfig(snapshot.draft || snapshot.deployed);
-                setValidation(validateUglinkConfig(snapshot.draft || snapshot.deployed));
-              }}
               onRestored={() => window.location.reload()}
-              onNotice={(type, message) => setNotice({ type, message })}
             />
           ) : null}
         </main>

@@ -38,6 +38,7 @@ let target = {
 let deploymentJob;
 let deploymentRequests = 0;
 let lastDeploymentMode;
+let lastDeploymentRequest;
 let publishedHealthRequests = 0;
 let publishedServicesHealthy = true;
 let diagnosticEntries = [];
@@ -46,8 +47,8 @@ let cloudConfiguration;
 function emptyConfig() {
   return {
     $schema: './uglink.config.schema.json',
-    version: 1,
-    uglink: { baseUrl: '', username: '' },
+    version: 2,
+    uglink: { id: '', username: '' },
     services: [],
     deployment: { workersDev: true, previewUrls: false }
   };
@@ -82,7 +83,7 @@ function validation() {
     valid: true,
     checks: [
       { id: 'schema', label: '配置结构', detail: '字段、类型和取值范围符合配置规范。', level: 'pass' },
-      { id: 'upstream', label: 'UGLINK 上游地址', detail: '使用 HTTPS。', level: 'pass' },
+      { id: 'uglink-id', label: 'UGREENlink ID', detail: '运行时自动发现地址。', level: 'pass' },
       { id: 'unique-services', label: '服务映射唯一性', detail: '没有重复映射。', level: 'pass' },
       { id: 'enabled-services', label: '已启用服务', detail: '服务会被发布。', level: 'pass' },
       { id: 'username', label: '登录用户名', detail: '用户名已设置。', level: 'pass' }
@@ -188,6 +189,7 @@ await page.route('**/api/**', async (route) => {
   }
   if (request.method() === 'POST' && url.pathname === '/api/deploy') {
     const body = request.postDataJSON();
+    lastDeploymentRequest = body;
     configuration = {
       version: 1,
       deployed: body.config,
@@ -297,7 +299,7 @@ try {
   await page.getByLabel('第 1 个服务名').fill('qa-api');
   await page.getByLabel('第 1 个服务域名').fill('qa-api.example.com');
   await page.getByLabel('第 1 个 NAS 端口').fill('9000');
-  await page.getByLabel('绿联云地址').fill('https://device.example.test');
+  await page.getByLabel('UGREENlink ID').fill('qa-device');
   await page.getByLabel('登录用户名').fill('test-user');
   const passwordInput = page.getByLabel('登录密码');
   await passwordInput.fill('qa-visible-secret');
@@ -309,15 +311,29 @@ try {
   await page.getByRole('button', { name: '隐藏密码', exact: true }).click();
   assert(await passwordInput.getAttribute('type') === 'password', 'The password visibility control hides the password again.');
   await page.screenshot({ path: screenshotPath('password-hidden.png'), fullPage: false });
-  await draftSaved;
+  const draftResponse = await draftSaved;
+  const draftConfig = draftResponse.request().postDataJSON().config;
+  assert(draftConfig.uglink.id === 'qa-device', 'The draft persists the UGREENlink ID.');
+  assert(draftConfig.uglink.username === 'test-user', 'The draft persists the NAS login username separately.');
+  assert(!JSON.stringify(draftConfig).includes('qa-visible-secret'), 'The NAS password is absent from persisted configuration.');
   await page.reload({ waitUntil: 'networkidle' });
   assert(await page.getByLabel('第 1 个服务域名').inputValue() === 'qa-api.example.com', 'The browser-local draft survives reload.');
+  assert(await page.getByLabel('UGREENlink ID').inputValue() === 'qa-device', 'The UGREENlink ID survives reload.');
+  assert(await page.getByLabel('登录用户名').inputValue() === 'test-user', 'The NAS login username survives reload.');
+  assert(await page.getByLabel('登录密码').inputValue() === '', 'The NAS password never survives reload.');
+  await page.getByLabel('登录密码').fill('qa-deploy-secret');
   await page.getByRole('button', { name: /检查配置/ }).click();
   await page.getByText('配置已通过服务器校验。').waitFor();
   const toastBox = await page.locator('.toast').boundingBox();
   assert(Boolean(toastBox && toastBox.y < 160 && toastBox.x + toastBox.width > 1380), 'Notifications appear in the upper-right corner.');
   assert(await page.getByRole('button', { name: /发布更改/ }).isEnabled(), 'A valid edit enables deployment.');
+  const publishResponse = page.waitForResponse((response) => (
+    response.url().endsWith('/api/deploy') && response.request().method() === 'POST'
+  ));
   await page.getByRole('button', { name: /发布更改/ }).click();
+  await publishResponse;
+  assert(lastDeploymentRequest.password === 'qa-deploy-secret', 'The NAS password is submitted only as the top-level deployment secret.');
+  assert(!JSON.stringify(lastDeploymentRequest.config).includes('qa-deploy-secret'), 'The NAS password is absent from the deployed configuration.');
   await page.getByRole('heading', { name: '服务配置', exact: true }).waitFor();
   await page.locator('.service-status--success').waitFor({ timeout: 10_000 });
   assert(await page.getByLabel('第 1 个服务域名').inputValue() === 'qa-api.example.com', 'The deployed service remains visible in the service list.');
@@ -370,6 +386,10 @@ try {
   const backupCard = page.locator('.security-card').filter({
     has: page.getByRole('heading', { name: '加密备份与恢复', exact: true })
   });
+  assert(await page.getByRole('button', { name: '导出配置', exact: true }).count() === 0, 'Plain configuration export is not available.');
+  assert(await page.getByRole('heading', { name: '配置导入', exact: true }).count() === 0, 'The configuration transfer card is absent.');
+  assert(await page.getByRole('button', { name: '导入配置', exact: true }).count() === 0, 'Plain configuration import is not available.');
+  assert(await backupCard.getByRole('button', { name: '导出备份', exact: true }).isVisible(), 'Encrypted backup export remains available.');
   await backupCard.getByRole('button', { name: '恢复备份', exact: true }).click();
   await page.getByRole('heading', { name: '恢复加密备份', exact: true }).waitFor();
   assert(await page.getByRole('button', { name: '选择备份文件', exact: true }).isVisible(), 'Backup restore uses the styled file picker.');

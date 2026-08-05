@@ -6,7 +6,6 @@ const HEALTH_PATH = '/.well-known/uglink-worker-health';
 const REPLAY_SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 export interface GatewayRuntime {
-  baseUrl: string;
   serviceMap: string;
   setupMode: boolean;
 }
@@ -88,20 +87,41 @@ export async function handleGatewayRequest(
 
   try {
     let session = await dependencies.sessions.get(port);
-    let response = await dependencies.transport.send(request, session);
+    let response: Response;
+    try {
+      response = await dependencies.transport.send(request, session);
+    } catch {
+      await dependencies.sessions.invalidate(port);
+      dependencies.logger.info({ event: 'proxy_upstream_unavailable', hostname, port, method: request.method });
+      if (!canReplayAutomatically(request)) return proxySessionResponse(request, false);
+      session = await dependencies.sessions.refresh(port);
+      try {
+        response = await dependencies.transport.send(request, session);
+      } catch (error) {
+        await dependencies.sessions.invalidate(port);
+        throw error;
+      }
+    }
 
-    if (dependencies.transport.isSessionExpired(response, runtime.baseUrl)) {
+    if (dependencies.transport.isSessionExpired(response, session)) {
       await response.body?.cancel();
-      await dependencies.sessions.clear(port);
       dependencies.logger.info({ event: 'proxy_session_expired', hostname, port, method: request.method });
 
-      if (!canReplayAutomatically(request)) return proxySessionResponse(request, true);
+      if (!canReplayAutomatically(request)) {
+        await dependencies.sessions.invalidate(port);
+        return proxySessionResponse(request, true);
+      }
 
-      session = await dependencies.sessions.create(port);
-      response = await dependencies.transport.send(request, session);
-      if (dependencies.transport.isSessionExpired(response, runtime.baseUrl)) {
+      session = await dependencies.sessions.refresh(port);
+      try {
+        response = await dependencies.transport.send(request, session);
+      } catch (error) {
+        await dependencies.sessions.invalidate(port);
+        throw error;
+      }
+      if (dependencies.transport.isSessionExpired(response, session)) {
         await response.body?.cancel();
-        await dependencies.sessions.clear(port);
+        await dependencies.sessions.invalidate(port);
         return proxySessionResponse(request, false);
       }
     }

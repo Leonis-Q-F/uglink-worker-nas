@@ -1,7 +1,7 @@
 import type { ResolvedUglinkConfig, UglinkConfig, UglinkService } from '../../domain/configuration/model';
 
 export interface WorkerRuntimeBindings {
-  BASE_URL: string;
+  UGLINK_ID: string;
   USERNAME: string;
   SERVICE_MAP: string;
   SETUP_MODE: 'true' | 'false';
@@ -13,8 +13,8 @@ export function activeServices(config: UglinkConfig): UglinkService[] {
 }
 
 export async function createSessionNamespace(config: UglinkConfig): Promise<string> {
-  if (!config.uglink.baseUrl || !config.uglink.username) return 'setup';
-  const source = `${new URL(config.uglink.baseUrl).origin}\0${config.uglink.username}`;
+  if (!config.uglink.id || !config.uglink.username) return 'setup';
+  const source = `${config.uglink.id}\0${config.uglink.username}`;
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source));
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, '0'))
@@ -28,7 +28,7 @@ export async function createWorkerRuntimeBindings(config: UglinkConfig): Promise
     services.map((service) => [service.hostname.toLowerCase(), String(service.port)])
   );
   return {
-    BASE_URL: config.uglink.baseUrl,
+    UGLINK_ID: config.uglink.id,
     USERNAME: config.uglink.username,
     SERVICE_MAP: JSON.stringify(serviceMap),
     SETUP_MODE: services.length === 0 ? 'true' : 'false',

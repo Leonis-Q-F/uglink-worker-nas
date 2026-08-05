@@ -66,10 +66,10 @@
         "description": "KV namespace used for encrypted console sessions and deployment state."
       },
       "PASSWORD": {
-        "description": "UGREEN remote-access password stored as a Worker secret."
+        "description": "NAS login password stored as a Worker secret."
       },
       "UGLINK_CACHE": {
-        "description": "KV namespace used to cache short-lived UGREEN proxy sessions."
+        "description": "KV namespace used for short-lived UGREEN discovery and proxy sessions."
       }
     }
   }

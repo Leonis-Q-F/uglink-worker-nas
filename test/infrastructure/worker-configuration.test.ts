@@ -12,9 +12,9 @@ const baseConfig = {
 
 test('generator creates SERVICE_MAP and custom domains from one service list', async () => {
   const config = resolveUglinkConfig({
-    version: 1,
+    version: 2,
     uglink: {
-      baseUrl: 'https://device.example.ug.link/',
+      id: 'My-NAS',
       username: 'user'
     },
     services: [
@@ -26,7 +26,8 @@ test('generator creates SERVICE_MAP and custom domains from one service list', a
 
   const generated = await generateWranglerConfig(baseConfig, config);
   const vars = generated.vars as Record<string, string>;
-  assert.equal(vars.BASE_URL, 'https://device.example.ug.link');
+  assert.equal(vars.UGLINK_ID, 'my-nas');
+  assert.equal('BASE_URL' in vars, false);
   assert.equal(vars.SERVICE_MAP, '{"api.example.com":"8317"}');
   assert.equal(vars.SETUP_MODE, 'false');
   assert.match(vars.SESSION_NAMESPACE ?? '', /^[a-f0-9]{16}$/u);
@@ -37,8 +38,8 @@ test('generator creates SERVICE_MAP and custom domains from one service list', a
 
 test('generator supports a safe first-deploy setup mode', async () => {
   const config = resolveUglinkConfig({
-    version: 1,
-    uglink: { baseUrl: '', username: '' },
+    version: 2,
+    uglink: { id: '', username: '' },
     services: []
   });
   const generated = await generateWranglerConfig(baseConfig, config);
@@ -51,8 +52,8 @@ test('generator supports a safe first-deploy setup mode', async () => {
 
 test('validation rejects duplicate hostnames', () => {
   assert.throws(() => resolveUglinkConfig({
-    version: 1,
-    uglink: { baseUrl: 'https://device.example.ug.link', username: 'user' },
+    version: 2,
+    uglink: { id: 'device', username: 'user' },
     services: [
       { name: 'one', hostname: 'api.example.com', port: 8317 },
       { name: 'two', hostname: 'API.EXAMPLE.COM', port: 8318 }
@@ -60,10 +61,10 @@ test('validation rejects duplicate hostnames', () => {
   }), /服务域名重复/u);
 });
 
-test('validation rejects credentials and paths in BASE_URL', () => {
+test('validation rejects URLs and invalid UGREENlink IDs', () => {
   assert.throws(() => resolveUglinkConfig({
-    version: 1,
-    uglink: { baseUrl: 'https://user@example.com/path', username: 'user' },
+    version: 2,
+    uglink: { id: 'https://device.example.test', username: 'user' },
     services: [{ name: 'api', hostname: 'api.example.com', port: 8317 }]
-  }), /HTTPS 源地址/u);
+  }), /UGREENlink ID/u);
 });

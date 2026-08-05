@@ -7,9 +7,9 @@ export interface UglinkService {
 
 export interface UglinkConfig {
   $schema?: string;
-  version: 1;
+  version: 2;
   uglink: {
-    baseUrl: string;
+    id: string;
     username: string;
   };
   services: UglinkService[];
