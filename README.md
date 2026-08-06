@@ -177,16 +177,9 @@ Gateway Worker 的核心配置，由控制台自动生成：
       "port": 8443,
       "enabled": true
     }
-  ],
-  "deployment": {
-    "workersDev": true,
-    "previewUrls": false
-  }
+  ]
 }
 ```
-
-`uglink.id` 是 `https://ug.link/<ID>` 末尾的 UGREENlink ID，与 NAS 登录用户名彼此独立。Gateway 在创建代理会话时通过绿联发现接口解析当前中继地址，结果缓存 5 分钟；缓存地址失效或代理连接失败时会强制重新发现一次。NAS 密码只进入目标 Worker Secret，不属于配置文件。
-
 ### 环境变量
 
 | 变量 | 说明 | 默认值 |

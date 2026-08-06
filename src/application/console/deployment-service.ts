@@ -281,22 +281,17 @@ export function createDeploymentService(dependencies: DeploymentServiceDependenc
       }
 
       const desiredHostnames = job.services.map((service) => service.hostname);
-      advance(job, 'routing', '正在配置访问域名和默认访问地址。');
+      advance(job, 'routing', '正在配置自定义访问域名。');
       await jobs.save(job);
       await provider.reconcileDomains(target, desiredHostnames);
-      const noCustomDomains = desiredHostnames.length === 0;
-      await provider.updateSubdomain(
-        target,
-        config.deployment?.workersDev === true || noCustomDomains,
-        config.deployment?.previewUrls === true
-      );
+      await provider.updateSubdomain(target, false, false);
       advance(job, 'routing', `${desiredHostnames.length} 个访问域名已配置。`);
       await jobs.save(job);
 
       const latest = await provider.latestDeployment(target);
       if (latest) job.cloudflareDeploymentId = latest.id;
       if (job.services.length === 0) {
-        advance(job, 'healthy', '服务已发布，默认访问地址已启用。');
+        advance(job, 'healthy', '服务已发布，当前没有公开访问入口。');
       } else {
         await health.check(job.services);
         await appendDiagnostics(serviceDiagnostics(job.services, new Date().toISOString(), job));

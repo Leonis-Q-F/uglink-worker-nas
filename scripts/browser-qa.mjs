@@ -50,7 +50,7 @@ function emptyConfig() {
     version: 2,
     uglink: { id: '', username: '' },
     services: [],
-    deployment: { workersDev: true, previewUrls: false }
+    deployment: { workersDev: false, previewUrls: false }
   };
 }
 
@@ -282,12 +282,9 @@ try {
   assert(await page.locator('.app-sidebar nav button').count() === 3, 'Desktop navigation contains service configuration, diagnostics, and security.');
   assert(await page.getByText('由 Cloudflare 托管', { exact: true }).count() === 0, 'The redundant Cloudflare hosting badge is absent.');
   assert(await page.getByRole('button', { name: '发布状态', exact: true }).count() === 0, 'The standalone deployment page is not present.');
-  const optionRows = page.locator('.deployment-options .option-row');
-  const optionHeadingBox = await page.locator('.deployment-options .panel__heading').boundingBox();
-  const firstOptionBox = await optionRows.nth(0).boundingBox();
-  const secondOptionBox = await optionRows.nth(1).boundingBox();
-  assert(Boolean(optionHeadingBox && firstOptionBox && firstOptionBox.y - (optionHeadingBox.y + optionHeadingBox.height) >= 16), 'Access settings have spacing below the heading.');
-  assert(Boolean(firstOptionBox && secondOptionBox && secondOptionBox.y - (firstOptionBox.y + firstOptionBox.height) >= 16), 'Access setting cards have visible spacing.');
+  assert(await page.getByText('访问设置', { exact: true }).count() === 0, 'The access settings panel is absent.');
+  assert(await page.getByText('默认访问地址（workers.dev）', { exact: true }).count() === 0, 'The workers.dev option is absent.');
+  assert(await page.getByText('版本预览地址', { exact: true }).count() === 0, 'The preview URL option is absent.');
   const dashboardMetrics = await layoutMetrics();
   assert(dashboardMetrics.bodyWidth <= dashboardMetrics.viewportWidth + 1, 'Desktop dashboard has no horizontal overflow.');
   await page.screenshot({ path: screenshotPath('dashboard.png'), fullPage: false });
@@ -298,6 +295,9 @@ try {
   await page.getByRole('button', { name: /添加服务/ }).click();
   await page.getByLabel('第 1 个服务名').fill('qa-api');
   await page.getByLabel('第 1 个服务域名').fill('qa-api.example.com');
+  const serviceAddress = page.getByRole('link', { name: 'https://qa-api.example.com' });
+  assert(await serviceAddress.isVisible(), 'A valid custom domain is shown as the service access address.');
+  assert(await serviceAddress.getAttribute('href') === 'https://qa-api.example.com', 'The service access address is a clickable HTTPS link.');
   await page.getByLabel('第 1 个 NAS 端口').fill('9000');
   await page.getByLabel('UGREENlink ID').fill('qa-device');
   await page.getByLabel('登录用户名').fill('test-user');

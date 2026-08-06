@@ -205,7 +205,9 @@ describe('production Cloudflare deployment', () => {
       throw new Error(`Unexpected fetch: ${method} ${url}`);
     }));
 
-    const job = await service().createDeployment({ config: configuredConfig() });
+    const requestedConfig = configuredConfig();
+    requestedConfig.deployment = { workersDev: true, previewUrls: true };
+    const job = await service().createDeployment({ config: requestedConfig });
 
     expect(job.phase).toBe('healthy');
     expect(job.mode).toBe('publish');
@@ -263,6 +265,11 @@ describe('production Cloudflare deployment', () => {
     const detachIndex = calls.findIndex((call) => call.url.endsWith('/workers/domains/old-domain-id') && call.method === 'DELETE');
     expect(attachIndex).toBeGreaterThan(-1);
     expect(detachIndex).toBeGreaterThan(attachIndex);
+
+    const subdomain = calls.find((call) => (
+      call.url.endsWith('/workers/scripts/uglink-test/subdomain') && call.method === 'POST'
+    ));
+    expect(subdomain?.body).toBe(JSON.stringify({ enabled: false, previews_enabled: false }));
 
   });
 

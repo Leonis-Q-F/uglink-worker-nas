@@ -63,10 +63,12 @@
       "additionalProperties": false,
       "properties": {
         "workersDev": {
-          "type": "boolean"
+          "const": false,
+          "description": "Gateway 只允许通过自定义域名访问。"
         },
         "previewUrls": {
-          "type": "boolean"
+          "const": false,
+          "description": "Gateway 不创建版本预览地址。"
         }
       }
     }

@@ -8,6 +8,7 @@ import {
   Code2,
   Eye,
   EyeOff,
+  ExternalLink,
   FileCheck2,
   HardDrive,
   LoaderCircle,
@@ -31,6 +32,7 @@ import { defaultConfig } from '../../../domain/configuration/defaults';
 import type { UglinkConfig } from '../../../domain/configuration/model';
 import {
   configsEqual,
+  normalizeHostname,
   prettyConfig,
   validateUglinkConfig,
   type ValidationCheck,
@@ -254,6 +256,14 @@ function compactFailureLabel(result: ServiceHealthResponse['services'][number]):
   return '异常';
 }
 
+function serviceAccessAddress(hostname: string): string | undefined {
+  try {
+    return `https://${normalizeHostname(hostname)}`;
+  } catch {
+    return undefined;
+  }
+}
+
 function ServiceStatus({ value, onInspect }: { value: ServiceStatusValue; onInspect?: () => void }) {
   const Icon = value.tone === 'success'
     ? CheckCircle2
@@ -430,7 +440,7 @@ function ConfigEditor({
 
         <div className="service-table" role="table" aria-label="反向代理服务列表">
           <div className="service-table__head" role="row">
-            <span>服务名</span><span>完整域名</span><span>NAS 端口</span><span>状态</span><span>启用</span><span>操作</span>
+            <span>服务名</span><span>完整域名</span><span>访问地址</span><span>NAS 端口</span><span>状态</span><span>启用</span><span>操作</span>
           </div>
           {config.services.length === 0 && (
             <div className="empty-row"><ServerCog size={20} /><span>还没有服务。添加一行后即可配置域名和端口。</span></div>
@@ -455,6 +465,19 @@ function ConfigEditor({
                   />
                 </div>
               </label>
+              <div data-label="访问地址" className="service-table__address">
+                {serviceAccessAddress(service.hostname) ? (
+                  <a
+                    href={serviceAccessAddress(service.hostname)}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={serviceAccessAddress(service.hostname)}
+                  >
+                    <ExternalLink size={13} aria-hidden="true" />
+                    <span>{serviceAccessAddress(service.hostname)}</span>
+                  </a>
+                ) : <span>未配置</span>}
+              </div>
               <label data-label="NAS 端口">
                 <input
                   type="number"
@@ -506,33 +529,6 @@ function ConfigEditor({
         </div>
       </section>
 
-      <section className="panel deployment-options">
-        <div className="panel__heading">
-          <div><p className="eyebrow">访问设置</p><h2>公开访问地址</h2></div>
-        </div>
-        <div className="option-row">
-          <div><strong>默认访问地址（workers.dev）</strong><p>启用 Cloudflare 提供的默认访问地址。</p></div>
-          <Toggle
-            checked={config.deployment?.workersDev === true}
-            onChange={(workersDev) => onChange({
-              ...config,
-              deployment: { ...config.deployment, workersDev }
-            })}
-            label="默认访问地址"
-          />
-        </div>
-        <div className="option-row">
-          <div><strong>版本预览地址</strong><p>为每次发布生成独立的预览地址。</p></div>
-          <Toggle
-            checked={config.deployment?.previewUrls === true}
-            onChange={(previewUrls) => onChange({
-              ...config,
-              deployment: { ...config.deployment, previewUrls }
-            })}
-            label="版本预览地址"
-          />
-        </div>
-      </section>
     </div>
   );
 }

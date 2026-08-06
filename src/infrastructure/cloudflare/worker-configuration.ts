@@ -43,8 +43,8 @@ export async function generateWranglerConfig(
   const services = activeServices(config);
   const generated: Record<string, unknown> = {
     ...baseConfig,
-    workers_dev: config.deployment.workersDev,
-    preview_urls: config.deployment.previewUrls,
+    workers_dev: false,
+    preview_urls: false,
     vars: {
       ...(typeof baseConfig.vars === 'object' && baseConfig.vars !== null ? baseConfig.vars : {}),
       ...await createWorkerRuntimeBindings(config)

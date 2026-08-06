@@ -186,8 +186,8 @@ export function resolveUglinkConfig(value: unknown): ResolvedUglinkConfig {
     uglink: { id, username },
     services,
     deployment: {
-      workersDev: config.deployment?.workersDev ?? activeServices.length === 0,
-      previewUrls: config.deployment?.previewUrls ?? false
+      workersDev: false,
+      previewUrls: false
     }
   };
 }
@@ -245,7 +245,7 @@ export function validateUglinkConfig(value: unknown): ValidationResponse {
     label: '已启用服务',
     detail: enabledCount > 0
       ? `${enabledCount} 个服务会被发布。`
-      : '当前没有启用服务；发布后仅保留默认访问地址。',
+      : '当前没有启用服务；发布后不会创建公开访问入口。',
     level: enabledCount > 0 ? 'pass' : 'warning'
   });
 

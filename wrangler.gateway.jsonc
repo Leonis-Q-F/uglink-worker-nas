@@ -4,7 +4,7 @@
   "main": "src/interfaces/http/gateway/worker.ts",
   "compatibility_date": "2026-08-03",
   "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": true,
+  "workers_dev": false,
   "preview_urls": false,
   "vars": {
     "UGLINK_ID": "",

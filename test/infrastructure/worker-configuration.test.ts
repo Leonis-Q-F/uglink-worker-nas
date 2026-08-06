@@ -21,7 +21,7 @@ test('generator creates SERVICE_MAP and custom domains from one service list', a
       { name: 'api', hostname: 'API.Example.com.', port: 8317 },
       { name: 'disabled', hostname: 'off.example.com', port: 9999, enabled: false }
     ],
-    deployment: { workersDev: false, previewUrls: false }
+    deployment: { workersDev: true, previewUrls: true }
   });
 
   const generated = await generateWranglerConfig(baseConfig, config);
@@ -34,6 +34,8 @@ test('generator creates SERVICE_MAP and custom domains from one service list', a
   assert.deepEqual(generated.routes, [
     { pattern: 'api.example.com', custom_domain: true }
   ]);
+  assert.equal(generated.workers_dev, false);
+  assert.equal(generated.preview_urls, false);
 });
 
 test('generator supports a safe first-deploy setup mode', async () => {
@@ -44,10 +46,22 @@ test('generator supports a safe first-deploy setup mode', async () => {
   });
   const generated = await generateWranglerConfig(baseConfig, config);
   const vars = generated.vars as Record<string, string>;
-  assert.equal(generated.workers_dev, true);
+  assert.equal(generated.workers_dev, false);
+  assert.equal(generated.preview_urls, false);
   assert.equal(vars.SETUP_MODE, 'true');
   assert.equal(vars.SERVICE_MAP, '{}');
   assert.equal('routes' in generated, false);
+});
+
+test('validation disables default and preview addresses from persisted v2 configuration', () => {
+  const config = resolveUglinkConfig({
+    version: 2,
+    uglink: { id: 'device', username: 'user' },
+    services: [{ name: 'api', hostname: 'api.example.com', port: 8317 }],
+    deployment: { workersDev: true, previewUrls: true }
+  });
+
+  assert.deepEqual(config.deployment, { workersDev: false, previewUrls: false });
 });
 
 test('validation rejects duplicate hostnames', () => {

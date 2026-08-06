@@ -62,8 +62,8 @@ export function normalizeDraftConfiguration(value: unknown): UglinkConfig {
     throw new ApplicationError(400, 'invalid_config', 'deployment 必须是对象。');
   }
   const deployment = value.deployment as Record<string, unknown> | undefined;
-  const workersDev = optionalBoolean(deployment?.workersDev, 'deployment.workersDev');
-  const previewUrls = optionalBoolean(deployment?.previewUrls, 'deployment.previewUrls');
+  optionalBoolean(deployment?.workersDev, 'deployment.workersDev');
+  optionalBoolean(deployment?.previewUrls, 'deployment.previewUrls');
   return {
     ...(typeof value.$schema === 'string' && value.$schema.length <= 256
       ? { $schema: value.$schema }
@@ -73,11 +73,7 @@ export function normalizeDraftConfiguration(value: unknown): UglinkConfig {
       id: boundedString(value.uglink.id, 'uglink.id', MAX_UGLINK_ID_LENGTH),
       username: boundedString(value.uglink.username, 'uglink.username', MAX_USERNAME_LENGTH)
     },
-    services: value.services.map(draftService),
-    deployment: {
-      ...(workersDev === undefined ? {} : { workersDev }),
-      ...(previewUrls === undefined ? {} : { previewUrls })
-    }
+    services: value.services.map(draftService)
   };
 }
 

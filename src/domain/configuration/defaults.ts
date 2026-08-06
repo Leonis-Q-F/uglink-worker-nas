@@ -8,10 +8,6 @@ export function defaultConfig(): UglinkConfig {
       id: '',
       username: ''
     },
-    services: [],
-    deployment: {
-      workersDev: true,
-      previewUrls: false
-    }
+    services: []
   };
 }

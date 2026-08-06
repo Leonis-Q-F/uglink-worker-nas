@@ -1156,12 +1156,13 @@ button:disabled,
 
 .service-table {
   min-width: 0;
+  overflow-x: auto;
 }
 
 .service-table__head,
 .service-table__row {
   display: grid;
-  grid-template-columns: minmax(90px, 0.75fr) minmax(170px, 1.45fr) minmax(76px, 0.5fr) minmax(82px, 0.6fr) 54px 44px;
+  grid-template-columns: minmax(90px, 0.7fr) minmax(160px, 1.25fr) minmax(145px, 1.1fr) minmax(76px, 0.5fr) minmax(82px, 0.6fr) 54px 44px;
   align-items: center;
   gap: 8px;
 }
@@ -1192,10 +1193,41 @@ button:disabled,
 }
 
 .service-table__status,
+.service-table__address,
 .service-table__toggle,
 .service-table__actions {
   display: flex;
   align-items: center;
+}
+
+.service-table__address {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.service-table__address a {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  color: var(--navy);
+  text-decoration: none;
+}
+
+.service-table__address a:hover {
+  color: var(--orange-dark);
+  text-decoration: underline;
+}
+
+.service-table__address a svg {
+  flex: 0 0 auto;
+}
+
+.service-table__address a span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .service-status {
@@ -1256,35 +1288,6 @@ button:disabled,
   padding: 18px;
   color: var(--muted);
   font-size: 11px;
-}
-
-.deployment-options .panel__heading {
-  padding-bottom: 13px;
-  margin-bottom: 16px;
-}
-
-.option-row {
-  display: flex;
-  min-height: 65px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 13px 20px;
-}
-
-.option-row + .option-row {
-  border-top: 1px solid var(--border);
-}
-
-.option-row strong {
-  color: var(--ink-soft);
-  font-size: 11px;
-}
-
-.option-row p {
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: 9px;
 }
 
 .inspector {
@@ -2544,7 +2547,7 @@ select:focus {
 
 .service-table__head,
 .service-table__row {
-  grid-template-columns: minmax(96px, 0.78fr) minmax(180px, 1.45fr) 82px 100px 58px 44px;
+  grid-template-columns: minmax(90px, 0.72fr) minmax(160px, 1.2fr) minmax(160px, 1.15fr) 78px 92px 54px 44px;
   gap: 10px;
 }
 
@@ -2667,36 +2670,6 @@ select:focus {
   min-height: 88px;
   color: var(--muted);
   font-size: 13px;
-}
-
-.deployment-options .panel__heading {
-  padding-bottom: 16px;
-  margin-bottom: 20px;
-}
-
-.option-row {
-  min-height: 78px;
-  margin: 0 20px 20px;
-  border: 1px solid rgba(216, 229, 242, 0.82);
-  border-radius: 18px;
-  padding: 16px 18px;
-  background: rgba(246, 250, 255, 0.84);
-}
-
-.option-row + .option-row {
-  border-top: 1px solid rgba(216, 229, 242, 0.82);
-}
-
-.option-row strong {
-  color: var(--ink);
-  font-size: 14px;
-}
-
-.option-row p {
-  margin-top: 5px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 18px;
 }
 
 .inspector {
@@ -3350,8 +3323,8 @@ select:focus {
 
   .service-table__head,
   .service-table__row {
-    grid-template-columns: minmax(90px, 0.72fr) minmax(160px, 1.35fr) 76px 92px 54px 42px;
-    gap: 8px;
+    grid-template-columns: minmax(70px, 0.7fr) minmax(125px, 1.2fr) minmax(120px, 1fr) 66px 78px 48px 38px;
+    gap: 6px;
   }
 
   .inspector {
@@ -3510,6 +3483,10 @@ select:focus {
     display: none;
   }
 
+  .service-table {
+    overflow-x: visible;
+  }
+
   .service-table__row {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -3523,6 +3500,7 @@ select:focus {
   }
 
   .service-table__row label::before,
+  .service-table__address::before,
   .service-table__status::before,
   .service-table__toggle::before,
   .service-table__actions::before {
@@ -3532,6 +3510,16 @@ select:focus {
     content: attr(data-label);
     font-size: 8px;
     font-weight: 750;
+  }
+
+  .service-table__address {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-content: space-between;
+  }
+
+  .service-table__address::before {
+    margin-bottom: 0;
   }
 
   .service-table__status {
