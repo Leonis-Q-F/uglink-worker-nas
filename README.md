@@ -75,6 +75,7 @@ UGLINK Worker NAS 的做法是：利用绿联已有的远程访问通道获取�
 
 - 一台绿联 NAS，已启用远程访问（UGLINK）
 - 一个 [Cloudflare 账户](https://dash.cloudflare.com/sign-up)（免费计划即可）
+- 一个自备并已托管到 Cloudflare 的域名；每项 NAS 服务需要分配独立子域名，才能实现多服务访问
 - Docker 和 Docker Compose（用于本地部署管理控制台）
 
 ### 获取 Cloudflare Account ID
