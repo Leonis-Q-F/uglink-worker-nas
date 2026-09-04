@@ -9,24 +9,50 @@ import {
 test('buildProxyHeaders preserves application cookies and replaces spoofed proxy cookies', () => {
   const request = new Request('https://api.example.com/v1', {
     headers: {
-      Cookie: 'app_session=abc; ugreen-proxy-token=spoofed',
+      Cookie: 'app_session=abc; relay_session=spoofed; ugreen-proxy-token=spoofed',
       'CF-Ray': 'test-ray',
+      Origin: 'https://api.example.com',
+      Referer: 'https://api.example.com/login?from=home',
       'X-Forwarded-For': '127.0.0.1',
       'X-App-Header': 'kept'
     }
   });
 
   const headers = buildProxyHeaders(request, {
-    cookie: 'ugreen-proxy-token=trusted',
+    cookie: 'relay_session=trusted-relay; ugreen-proxy-token=trusted',
     origin: 'https://proxy.example.net',
     loginOrigin: 'https://device.example.test'
   });
 
-  assert.equal(headers.get('cookie'), 'app_session=abc; ugreen-proxy-token=trusted');
+  assert.equal(
+    headers.get('cookie'),
+    'app_session=abc; relay_session=trusted-relay; ugreen-proxy-token=trusted'
+  );
   assert.equal(headers.get('host'), 'proxy.example.net');
+  assert.equal(headers.get('origin'), 'https://proxy.example.net');
+  assert.equal(headers.get('referer'), 'https://proxy.example.net/login?from=home');
   assert.equal(headers.get('x-app-header'), 'kept');
   assert.equal(headers.has('cf-ray'), false);
   assert.equal(headers.has('x-forwarded-for'), false);
+});
+
+test('buildProxyHeaders does not rewrite a cross-origin request context', () => {
+  const headers = buildProxyHeaders(
+    new Request('https://service.example.com/api', {
+      headers: {
+        Origin: 'https://untrusted.example',
+        Referer: 'https://untrusted.example/form'
+      }
+    }),
+    {
+      cookie: 'ugreen-proxy-token=trusted',
+      origin: 'https://proxy.example.net',
+      loginOrigin: 'https://device.example.test'
+    }
+  );
+
+  assert.equal(headers.get('origin'), 'https://untrusted.example');
+  assert.equal(headers.get('referer'), 'https://untrusted.example/form');
 });
 
 test('isUgreenLoginRedirect recognizes only the UGREEN account login redirect', () => {

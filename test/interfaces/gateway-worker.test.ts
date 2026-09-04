@@ -86,7 +86,10 @@ function installSuccessfulLoginFetch(
         }
       }));
     }
-    if (url === 'https://test-device.example.ug.link/ugreen/v1/gateway/proxy/dockerToken?port=8317') {
+    if (url.startsWith('https://test-device.example.ug.link/ugreen/v1/gateway/proxy/dockerToken?')) {
+      const parsed = new URL(url);
+      assert.equal(parsed.searchParams.get('port'), '8317');
+      assert.equal(parsed.searchParams.get('token'), 'temporary-token');
       return new Response(JSON.stringify({
         code: 200,
         data: { redirect_url: 'https://proxy.example.test/auth' }

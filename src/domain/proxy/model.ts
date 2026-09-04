@@ -10,4 +10,8 @@ export type ProxyFailureCode =
   | 'login_source_blocked'
   | 'account_blocked'
   | 'password_expired'
+  | 'otp_required'
+  | 'authentication_backoff'
+  | 'authentication_timeout'
+  | 'authentication_unavailable'
   | 'authentication_failed';

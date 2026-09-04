@@ -21,6 +21,8 @@
     <span> · </span>
     <a href="#配置说明">配置说明</a>
     <span> · </span>
+    <a href="https://github.com/Leonis-Q-F/uglink-worker-nas/releases">更新记录</a>
+    <span> · </span>
     <a href="SECURITY.md">安全策略</a>
   </h3>
 </div>
@@ -181,6 +183,15 @@ Gateway Worker 的核心配置，由控制台自动生成：
   ]
 }
 ```
+
+`uglink.id` 是设备的 UGREENlink ID；`uglink.username` 必须填写绿联 NAS 网页端使用的本地登录用户名。两者只有在你实际设置为同名时才相同。NAS 密码更新后需要在控制台重新填写并发布，因为 Cloudflare Worker Secret 无法回读或随备份恢复。
+
+### 登录与 401 排查
+
+网关登录和后端应用登录是两个独立层级：Worker 使用绿联 NAS 账号建立 UGREENlink 代理会话；思源笔记等应用仍可要求自己的锁屏密码或访问授权码。浏览器首次打开思源时跳转到 `/check-auth` 属于正常的思源认证流程，应填写思源自己的访问授权码，而不是 NAS 登录密码。
+
+命令行客户端的 User-Agent 不是浏览器时，思源可能直接返回 `401` 和 `Auth failed [session]`，不会展示登录页。这代表请求已经到达思源内核，并不表示绿联账号登录失败。请用浏览器确认实际访问结果。
+
 ### 环境变量
 
 | 变量 | 说明 | 默认值 |
@@ -251,6 +262,7 @@ src/
 > 通过 Custom Domain 暴露 NAS 服务到公网存在风险。请务必阅读 [SECURITY.md](SECURITY.md)。
 
 - 绿联密码仅存储在 Worker Secret，API Token 加密存储在服务端会话
+- 绿联代理会话与后端应用会话相互独立；建议为思源等应用保留自己的强密码
 - Docker 默认监听所有本机网络接口；请仅在可信局域网使用，远程访问时必须配置 HTTPS 和访问控制
 - 不要使用 Global API Key，不要把密码提交到 Git
 - 远程访问控制台请配合反向代理 + HTTPS 或 [Cloudflare Access](https://www.cloudflare.com/products/zero-trust/access/)
