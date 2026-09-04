@@ -9,7 +9,11 @@ import type {
 import type { UglinkConfig } from '../../domain/configuration/model';
 import { resolveUglinkConfig } from '../../domain/configuration/validation';
 import type { WorkerTarget } from '../../domain/deployment/model';
-import { createWorkerRuntimeBindings } from './worker-configuration';
+import {
+  CONTROL_MANAGED_BINDING,
+  CONTROL_MANAGED_MARKER,
+  createWorkerRuntimeBindings
+} from './worker-configuration';
 import {
   TARGET_COMPATIBILITY_DATE,
   TARGET_WORKER_MODULE,
@@ -17,7 +21,6 @@ import {
 } from './target-worker';
 
 const API_ROOT = 'https://api.cloudflare.com/client/v4';
-const CONTROL_MARKER = 'v1';
 const CONTROL_CONFIGURATION_KEY = 'uglink-control:configuration:v2';
 
 interface CloudflareMessage {
@@ -245,9 +248,9 @@ export async function loadCloudflareConfiguration(
 
   const bindings = settings.result.bindings || [];
   const managed = bindings.some((binding) => (
-    binding.name === 'UGLINK_CONTROL_MANAGED'
+    binding.name === CONTROL_MANAGED_BINDING
     && binding.type === 'plain_text'
-    && binding.text === CONTROL_MARKER
+    && binding.text === CONTROL_MANAGED_MARKER
   ));
   if (!managed) {
     throw new ApplicationError(
@@ -306,9 +309,9 @@ export async function assertWorkerOwnership(
 
   const bindings = envelope.result.bindings || [];
   const managed = bindings.some((binding) => (
-    binding.name === 'UGLINK_CONTROL_MANAGED'
+    binding.name === CONTROL_MANAGED_BINDING
     && binding.type === 'plain_text'
-    && binding.text === CONTROL_MARKER
+    && binding.text === CONTROL_MANAGED_MARKER
   ));
   if (managed) return;
 
@@ -368,7 +371,7 @@ export async function uploadProxyWorker(
     bindings: [
       { name: 'UGLINK_CACHE', type: 'kv_namespace', namespace_id: namespace.id },
       ...Object.entries(runtimeBindings).map(([name, text]) => ({ name, type: 'plain_text', text })),
-      { name: 'UGLINK_CONTROL_MANAGED', type: 'plain_text', text: CONTROL_MARKER }
+      { name: CONTROL_MANAGED_BINDING, type: 'plain_text', text: CONTROL_MANAGED_MARKER }
     ],
     compatibility_date: TARGET_COMPATIBILITY_DATE,
     compatibility_flags: ['nodejs_compat'],

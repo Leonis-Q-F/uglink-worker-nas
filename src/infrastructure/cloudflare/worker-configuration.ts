@@ -1,5 +1,8 @@
 import type { ResolvedUglinkConfig, UglinkConfig, UglinkService } from '../../domain/configuration/model';
 
+export const CONTROL_MANAGED_BINDING = 'UGLINK_CONTROL_MANAGED';
+export const CONTROL_MANAGED_MARKER = 'v1';
+
 export interface WorkerRuntimeBindings {
   UGLINK_ID: string;
   USERNAME: string;
@@ -47,7 +50,8 @@ export async function generateWranglerConfig(
     preview_urls: false,
     vars: {
       ...(typeof baseConfig.vars === 'object' && baseConfig.vars !== null ? baseConfig.vars : {}),
-      ...await createWorkerRuntimeBindings(config)
+      ...await createWorkerRuntimeBindings(config),
+      [CONTROL_MANAGED_BINDING]: CONTROL_MANAGED_MARKER
     }
   };
 

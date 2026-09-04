@@ -31,6 +31,7 @@ test('generator creates SERVICE_MAP and custom domains from one service list', a
   assert.equal(vars.SERVICE_MAP, '{"api.example.com":"8317"}');
   assert.equal(vars.SETUP_MODE, 'false');
   assert.match(vars.SESSION_NAMESPACE ?? '', /^[a-f0-9]{16}$/u);
+  assert.equal(vars.UGLINK_CONTROL_MANAGED, 'v1');
   assert.deepEqual(generated.routes, [
     { pattern: 'api.example.com', custom_domain: true }
   ]);
@@ -50,6 +51,7 @@ test('generator supports a safe first-deploy setup mode', async () => {
   assert.equal(generated.preview_urls, false);
   assert.equal(vars.SETUP_MODE, 'true');
   assert.equal(vars.SERVICE_MAP, '{}');
+  assert.equal(vars.UGLINK_CONTROL_MANAGED, 'v1');
   assert.equal('routes' in generated, false);
 });
 
