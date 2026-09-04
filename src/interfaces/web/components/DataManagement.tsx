@@ -27,7 +27,7 @@ export function DataManagement({
 
   return (
     <>
-      <section className="panel security-card security-card--wide">
+      <section className="panel security-card">
         <span className="security-card__icon security-card__icon--orange"><DatabaseBackup size={21} /></span>
         <div>
           <h2>加密备份与恢复</h2>

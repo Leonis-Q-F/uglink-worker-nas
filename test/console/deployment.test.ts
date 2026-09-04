@@ -273,6 +273,97 @@ describe('production Cloudflare deployment', () => {
 
   });
 
+  it('checks only changed services while keeping every active domain configured', async () => {
+    const target: WorkerTarget = {
+      accountId: 'account-id',
+      accountName: 'Test Account',
+      workerName: 'uglink-test'
+    };
+    let persistedConfiguration: Awaited<ReturnType<ReturnType<typeof createKvConfigurationRepository>['read']>>;
+    let tokenSequence = 0;
+    const jobs = new Map<string, Awaited<ReturnType<ReturnType<typeof service>['createDeployment']>>>();
+    const reconcileDomains = vi.fn(async () => undefined);
+    const check = vi.fn(async (services: Array<{ healthy: boolean; detail: string }>) => {
+      for (const entry of services) {
+        entry.healthy = true;
+        entry.detail = 'Worker 已部署且域名配置正常';
+      }
+    });
+    const deployment = createDeploymentService({
+      target,
+      provider: {
+        assertWorkerOwnership: vi.fn(async () => undefined),
+        hasWorkerPassword: vi.fn(async () => true),
+        ensureKvNamespace: vi.fn(async () => ({ id: 'namespace-id', title: 'namespace-title' })),
+        uploadWorker: vi.fn(async () => ({ deploymentId: 'deployment-id' })),
+        saveConfiguration: vi.fn(async () => undefined),
+        updatePassword: vi.fn(async () => undefined),
+        reconcileDomains,
+        updateSubdomain: vi.fn(async () => undefined),
+        latestDeployment: vi.fn(async () => ({
+          id: 'deployment-id',
+          createdAt: new Date().toISOString(),
+          source: 'api'
+        })),
+        dashboardUrl: vi.fn(() => 'https://dash.cloudflare.com/')
+      },
+      jobs: {
+        async save(job) {
+          jobs.set(job.id, structuredClone(job));
+        },
+        async read(id) {
+          return jobs.get(id);
+        }
+      },
+      diagnostics: {
+        append: vi.fn(async () => undefined),
+        list: vi.fn(async () => []),
+        replace: vi.fn(async () => undefined)
+      },
+      configuration: {
+        async read() {
+          return persistedConfiguration;
+        },
+        async write(state) {
+          persistedConfiguration = structuredClone(state);
+        }
+      },
+      health: { check },
+      tokens: { create: () => `test-token-${++tokenSequence}` }
+    });
+    const initial = configuredConfig();
+    initial.services.push({
+      name: 'photos',
+      hostname: 'photos.example.com',
+      port: 3000,
+      enabled: true
+    });
+
+    const first = await deployment.createDeployment({ config: initial });
+    const edited = structuredClone(initial);
+    edited.services[1]!.port = 3001;
+    const second = await deployment.createDeployment({ config: edited });
+
+    expect(first.services.map((entry) => entry.hostname)).toEqual([
+      'app.example.com',
+      'photos.example.com'
+    ]);
+    expect(second.services).toEqual([
+      expect.objectContaining({ hostname: 'photos.example.com', port: 3001, healthy: true })
+    ]);
+    expect(check).toHaveBeenNthCalledWith(1, expect.arrayContaining([
+      expect.objectContaining({ hostname: 'app.example.com' }),
+      expect.objectContaining({ hostname: 'photos.example.com' })
+    ]));
+    expect(check).toHaveBeenNthCalledWith(2, [
+      expect.objectContaining({ hostname: 'photos.example.com', port: 3001 })
+    ]);
+    expect(reconcileDomains).toHaveBeenLastCalledWith(target, [
+      'app.example.com',
+      'photos.example.com'
+    ]);
+  });
+
   it('overwrites the managed Worker when redeployment is requested', async () => {
     let uploadCount = 0;
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

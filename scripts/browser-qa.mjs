@@ -41,6 +41,7 @@ let lastDeploymentMode;
 let lastDeploymentRequest;
 let publishedHealthRequests = 0;
 let publishedServicesHealthy = true;
+let forceEmptyDeploymentServices = false;
 let diagnosticEntries = [];
 let cloudConfiguration;
 
@@ -89,6 +90,24 @@ function validation() {
       { id: 'username', label: '登录用户名', detail: '用户名已设置。', level: 'pass' }
     ]
   };
+}
+
+function serviceConfigurationsEqual(left, right) {
+  return Boolean(left && right
+    && left.name === right.name
+    && left.hostname === right.hostname
+    && left.port === right.port
+    && (left.enabled !== false) === (right.enabled !== false));
+}
+
+function servicesRequiringSynchronization(previous, next, mode, password) {
+  const activeServices = next.services.filter((service) => service.enabled !== false);
+  const connectionChanged = previous.uglink.id !== next.uglink.id
+    || previous.uglink.username !== next.uglink.username;
+  if (mode === 'overwrite' || Boolean(password) || connectionChanged) return activeServices;
+  return activeServices.filter((service) => (
+    !previous.services.some((candidate) => serviceConfigurationsEqual(service, candidate))
+  ));
 }
 
 function jsonResponse(route, body, status = 200) {
@@ -190,6 +209,14 @@ await page.route('**/api/**', async (route) => {
   if (request.method() === 'POST' && url.pathname === '/api/deploy') {
     const body = request.postDataJSON();
     lastDeploymentRequest = body;
+    const synchronizedServices = forceEmptyDeploymentServices
+      ? []
+      : servicesRequiringSynchronization(
+        configuration.deployed,
+        body.config,
+        body.mode || 'publish',
+        body.password
+      );
     configuration = {
       version: 1,
       deployed: body.config,
@@ -198,13 +225,16 @@ await page.route('**/api/**', async (route) => {
     deploymentRequests += 1;
     lastDeploymentMode = body.mode;
     const now = new Date().toISOString();
+    const deploymentPhase = synchronizedServices.length === 0 ? 'healthy' : 'checking';
     deploymentJob = {
       id: 'qa-deployment-0001',
       mode: body.mode || 'publish',
-      phase: 'checking',
+      phase: deploymentPhase,
       createdAt: now,
       updatedAt: now,
-      message: '服务已发布，正在等待访问域名生效。',
+      message: deploymentPhase === 'healthy'
+        ? '配置已发布，没有需要重新检查的服务入口。'
+        : '服务已发布，正在等待访问域名生效。',
       passwordUpdated: Boolean(body.password),
       workerName: target.workerName,
       accountId: account.id,
@@ -213,7 +243,7 @@ await page.route('**/api/**', async (route) => {
       kvNamespaceIdSuffix: 'c0ffee',
       cloudflareDeploymentId: 'deployment-version-0001',
       dashboardUrl: `https://dash.cloudflare.com/${account.id}/workers/services/view/${target.workerName}/production`,
-      services: body.config.services.filter((service) => service.enabled !== false).map((service) => ({
+      services: synchronizedServices.map((service) => ({
         serviceName: service.name,
         hostname: service.hostname,
         port: service.port,
@@ -227,7 +257,9 @@ await page.route('**/api/**', async (route) => {
         { phase: 'provisioning', label: '准备会话缓存', detail: '会话缓存已就绪。', at: now },
         { phase: 'uploading', label: '发布服务', detail: '服务已发布。', at: now },
         { phase: 'routing', label: '配置访问域名', detail: '访问域名已配置。', at: now },
-        { phase: 'checking', label: '检查服务状态', detail: '正在等待访问域名生效。', at: now }
+        deploymentPhase === 'healthy'
+          ? { phase: 'healthy', label: 'Worker 入口正常', detail: '没有需要重新检查的服务入口。', at: now }
+          : { phase: 'checking', label: '检查服务状态', detail: '正在等待访问域名生效。', at: now }
       ]
     };
     return jsonResponse(route, deploymentJob, 202);
@@ -282,6 +314,8 @@ try {
   assert(await page.locator('.app-sidebar nav button').count() === 3, 'Desktop navigation contains service configuration, diagnostics, and security.');
   assert(await page.getByText('由 Cloudflare 托管', { exact: true }).count() === 0, 'The redundant Cloudflare hosting badge is absent.');
   assert(await page.getByRole('button', { name: '发布状态', exact: true }).count() === 0, 'The standalone deployment page is not present.');
+  assert(await page.getByText('发布流程', { exact: true }).count() === 0, 'The deployment flow inspector section is absent.');
+  assert(await page.getByRole('heading', { name: '发布进度', exact: true }).count() === 0, 'The deployment progress panel is absent.');
   assert(await page.getByText('访问设置', { exact: true }).count() === 0, 'The access settings panel is absent.');
   assert(await page.getByText('默认访问地址（workers.dev）', { exact: true }).count() === 0, 'The workers.dev option is absent.');
   assert(await page.getByText('版本预览地址', { exact: true }).count() === 0, 'The preview URL option is absent.');
@@ -289,9 +323,16 @@ try {
   assert(dashboardMetrics.bodyWidth <= dashboardMetrics.viewportWidth + 1, 'Desktop dashboard has no horizontal overflow.');
   await page.screenshot({ path: screenshotPath('dashboard.png'), fullPage: false });
 
-  const draftSaved = page.waitForResponse((response) => (
-    response.url().endsWith('/api/configuration/draft') && response.request().method() === 'POST'
-  ));
+  const draftSaved = page.waitForResponse((response) => {
+    if (!response.url().endsWith('/api/configuration/draft') || response.request().method() !== 'POST') {
+      return false;
+    }
+    const draft = response.request().postDataJSON().config;
+    return draft.uglink.id === 'qa-device'
+      && draft.uglink.username === 'test-user'
+      && draft.services[0]?.hostname === 'qa-api.example.com'
+      && draft.services[0]?.port === 9000;
+  });
   await page.getByRole('button', { name: /添加服务/ }).click();
   await page.getByLabel('第 1 个服务名').fill('qa-api');
   await page.getByLabel('第 1 个服务域名').fill('qa-api.example.com');
@@ -346,11 +387,50 @@ try {
   assert(await page.getByText('未检查', { exact: true }).count() === 0, 'Published services never fall back to the unchecked state.');
   await page.screenshot({ path: screenshotPath('services-healthy.png'), fullPage: false });
 
+  await page.getByRole('button', { name: /添加服务/ }).click();
+  await page.getByLabel('第 2 个服务名').fill('qa-photos');
+  await page.getByLabel('第 2 个服务域名').fill('qa-photos.example.com');
+  await page.getByLabel('第 2 个 NAS 端口').fill('3000');
+  const firstServiceRow = page.locator('.service-table__row').nth(0);
+  const secondServiceRow = page.locator('.service-table__row').nth(1);
+  assert(await firstServiceRow.getByText('运行正常', { exact: true }).isVisible(), 'Editing another service preserves the unchanged service status.');
+  assert(await secondServiceRow.getByText('待发布', { exact: true }).isVisible(), 'A newly added service alone is marked as pending publication.');
+  const selectivePublishResponse = page.waitForResponse((response) => (
+    response.url().endsWith('/api/deploy') && response.request().method() === 'POST'
+  ));
+  await page.getByRole('button', { name: /发布更改/ }).click();
+  await selectivePublishResponse;
+  assert(deploymentJob.services.length === 1, 'A selective deployment checks only one changed service.');
+  assert(deploymentJob.services[0]?.hostname === 'qa-photos.example.com', 'The deployment task contains the newly added service.');
+  assert(await firstServiceRow.getByText('运行正常', { exact: true }).isVisible(), 'The unchanged service stays healthy while another service synchronizes.');
+  assert(await secondServiceRow.locator('.service-status--progress').isVisible(), 'Only the changed service enters the synchronization state.');
+  await page.screenshot({ path: screenshotPath('selective-sync.png'), fullPage: false });
+  await secondServiceRow.locator('.service-status--success').waitFor({ timeout: 10_000 });
+  assert(await firstServiceRow.getByText('运行正常', { exact: true }).isVisible(), 'The unchanged service remains healthy after selective synchronization completes.');
+  assert(await secondServiceRow.getByText('运行正常', { exact: true }).isVisible(), 'The changed service becomes healthy after synchronization completes.');
+
+  await page.getByLabel('第 2 个 NAS 端口').fill('3001');
+  assert(await secondServiceRow.getByText('待发布', { exact: true }).isVisible(), 'An edited service is pending before the empty-result regression check.');
+  forceEmptyDeploymentServices = true;
+  const emptyPublishResponse = page.waitForResponse((response) => (
+    response.url().endsWith('/api/deploy') && response.request().method() === 'POST'
+  ));
+  await page.getByRole('button', { name: /发布更改/ }).click();
+  await emptyPublishResponse;
+  forceEmptyDeploymentServices = false;
+  await secondServiceRow.getByText('运行正常', { exact: true }).waitFor();
+  assert(deploymentJob.phase === 'healthy', 'An empty incremental deployment is reported as healthy.');
+  assert(deploymentJob.services.length === 0, 'The regression scenario returns no services to recheck.');
+  assert(await firstServiceRow.getByText('运行正常', { exact: true }).isVisible(), 'The first service keeps its prior status after an empty incremental deployment.');
+  assert(await secondServiceRow.getByText('运行正常', { exact: true }).isVisible(), 'A successful empty incremental deployment preserves the edited service status instead of showing publication failure.');
+  assert(await page.getByText('发布失败', { exact: true }).count() === 0, 'No service displays a false publication failure.');
+  await page.screenshot({ path: screenshotPath('empty-sync-preserves-status.png'), fullPage: false });
+
   publishedServicesHealthy = false;
   await page.reload({ waitUntil: 'networkidle' });
-  await page.locator('.service-status--error').waitFor({ timeout: 10_000 });
-  assert(await page.getByText('HTTP 404', { exact: true }).isVisible(), 'An invalid Worker service entry shows a specific status in the service list.');
-  const errorStatus = page.getByRole('button', { name: /HTTP 404：服务入口返回 HTTP 404/ });
+  await page.locator('.service-status--error').first().waitFor({ timeout: 10_000 });
+  assert(await page.locator('.service-table__row').first().getByText('HTTP 404', { exact: true }).isVisible(), 'An invalid Worker service entry shows a specific status in the service list.');
+  const errorStatus = page.locator('.service-table__row').first().getByRole('button', { name: /HTTP 404：服务入口返回 HTTP 404/ });
   assert((await errorStatus.count()) === 1, 'The abnormal service provides a diagnostics entry point.');
   await errorStatus.click();
   await page.getByRole('heading', { name: '故障诊断', exact: true }).waitFor();
@@ -377,15 +457,25 @@ try {
 
   await page.locator('.app-sidebar button').filter({ hasText: '权限与安全' }).click();
   await page.getByRole('heading', { name: '权限与安全', exact: true }).waitFor();
-  assert(await page.getByText('持久化配置', { exact: true }).isVisible(), 'Server-side persistent configuration boundary is visible.');
+  assert(await page.getByText('持久化配置', { exact: true }).count() === 0, 'The persistent configuration card is absent.');
+  assert(await page.getByText('API Token 保护', { exact: true }).count() === 0, 'The API Token protection card is absent.');
   const cloudflareCard = page.locator('.security-card').filter({
     has: page.getByRole('heading', { name: 'Cloudflare 连接', exact: true })
   });
   assert(await cloudflareCard.count() === 1, 'Only the Cloudflare API Token connection is present.');
-  await page.screenshot({ path: screenshotPath('security.png'), fullPage: false });
   const backupCard = page.locator('.security-card').filter({
     has: page.getByRole('heading', { name: '加密备份与恢复', exact: true })
   });
+  assert(await page.locator('.security-grid > .security-card').count() === 2, 'The security page contains only the Cloudflare and encrypted backup cards.');
+  const cloudflareCardBox = await cloudflareCard.boundingBox();
+  const backupCardBox = await backupCard.boundingBox();
+  assert(Boolean(
+    cloudflareCardBox
+    && backupCardBox
+    && Math.abs(cloudflareCardBox.y - backupCardBox.y) <= 1
+    && backupCardBox.x > cloudflareCardBox.x + cloudflareCardBox.width
+  ), 'The Cloudflare connection and encrypted backup cards are side by side.');
+  await page.screenshot({ path: screenshotPath('security.png'), fullPage: false });
   assert(await page.getByRole('button', { name: '导出配置', exact: true }).count() === 0, 'Plain configuration export is not available.');
   assert(await page.getByRole('heading', { name: '配置导入', exact: true }).count() === 0, 'The configuration transfer card is absent.');
   assert(await page.getByRole('button', { name: '导入配置', exact: true }).count() === 0, 'Plain configuration import is not available.');
@@ -421,7 +511,7 @@ try {
   await page.getByLabel('服务名称').fill('uglink-reconnected');
   await page.getByRole('button', { name: /验证并继续/ }).click();
   await page.getByRole('heading', { name: '检测到已有配置', exact: true }).waitFor();
-  assert(await page.getByText('1 个已发布服务', { exact: true }).isVisible(), 'Cloud configuration import requires explicit confirmation.');
+  assert(await page.getByText('2 个已发布服务', { exact: true }).isVisible(), 'Cloud configuration import requires explicit confirmation.');
   await page.screenshot({ path: screenshotPath('cloud-configuration-import.png'), fullPage: false });
   await page.getByRole('button', { name: /导入配置/ }).click();
   await page.getByRole('heading', { name: '检测到已有配置', exact: true }).waitFor({ state: 'hidden' });
@@ -434,6 +524,23 @@ try {
   const mobileDashboardMetrics = await layoutMetrics();
   assert(mobileDashboardMetrics.bodyWidth <= mobileDashboardMetrics.viewportWidth + 1, 'Mobile dashboard has no horizontal overflow.');
   await page.screenshot({ path: screenshotPath('dashboard-mobile.png'), fullPage: true });
+
+  await page.locator('.mobile-section-nav').getByRole('button', { name: '权限与安全', exact: true }).click();
+  await page.getByRole('heading', { name: '权限与安全', exact: true }).waitFor();
+  const mobileCloudflareCardBox = await page.locator('.security-card').filter({
+    has: page.getByRole('heading', { name: 'Cloudflare 连接', exact: true })
+  }).boundingBox();
+  const mobileBackupCardBox = await page.locator('.security-card').filter({
+    has: page.getByRole('heading', { name: '加密备份与恢复', exact: true })
+  }).boundingBox();
+  assert(Boolean(
+    mobileCloudflareCardBox
+    && mobileBackupCardBox
+    && mobileBackupCardBox.y >= mobileCloudflareCardBox.y + mobileCloudflareCardBox.height
+  ), 'The two security cards stack vertically on mobile.');
+  const mobileSecurityMetrics = await layoutMetrics();
+  assert(mobileSecurityMetrics.bodyWidth <= mobileSecurityMetrics.viewportWidth + 1, 'Mobile security page has no horizontal overflow.');
+  await page.screenshot({ path: screenshotPath('security-mobile.png'), fullPage: true });
 
   assert(browserErrors.length === 0, `Browser emitted no errors or warnings. ${browserErrors.join(' | ')}`);
   await writeFile(join(outputDirectory, 'report.json'), JSON.stringify({

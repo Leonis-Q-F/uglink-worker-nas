@@ -1,6 +1,5 @@
 import {
   AlertCircle,
-  Check,
   CheckCircle2,
   ChevronRight,
   Circle,
@@ -10,7 +9,6 @@ import {
   EyeOff,
   ExternalLink,
   FileCheck2,
-  HardDrive,
   LoaderCircle,
   LockKeyhole,
   Plus,
@@ -29,6 +27,10 @@ import type {
   PersistedConfigurationState
 } from '../../../application/console/contracts';
 import { defaultConfig } from '../../../domain/configuration/defaults';
+import {
+  serviceConfigurationsEqual,
+  servicesRequiringSynchronization
+} from '../../../domain/configuration/change-set';
 import type { UglinkConfig } from '../../../domain/configuration/model';
 import {
   configsEqual,
@@ -118,14 +120,6 @@ function CloudConfigurationDialog({
   );
 }
 
-function formatTime(value: string): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  }).format(new Date(value));
-}
-
 function CheckIcon({ check }: { check: ValidationCheck }) {
   if (check.level === 'pass') return <CheckCircle2 className="check-icon check-icon--pass" size={18} />;
   if (check.level === 'warning') return <TriangleAlert className="check-icon check-icon--warning" size={18} />;
@@ -137,6 +131,7 @@ interface ConfigEditorProps {
   config: UglinkConfig;
   deployedConfig: UglinkConfig;
   deploymentConfig?: UglinkConfig;
+  deploymentServiceHostnames: ReadonlySet<string>;
   job?: DeploymentJob;
   publishedHealth?: ServiceHealthResponse;
   deploying: boolean;
@@ -156,22 +151,11 @@ interface ServiceStatusValue {
   tone: ServiceStatusTone;
 }
 
-function servicesEqual(
-  left: UglinkConfig['services'][number] | undefined,
-  right: UglinkConfig['services'][number] | undefined
-): boolean {
-  return Boolean(left && right
-    && left.name === right.name
-    && left.hostname === right.hostname
-    && left.port === right.port
-    && (left.enabled !== false) === (right.enabled !== false));
-}
-
 function resolveServiceStatus(
   service: UglinkConfig['services'][number],
-  index: number,
   deployedConfig: UglinkConfig,
   deploymentConfig: UglinkConfig | undefined,
+  deploymentServiceHostnames: ReadonlySet<string>,
   deploymentByHostname: Map<string, DeploymentJob['services'][number]>,
   publishedByHostname: Map<string, ServiceHealthResponse['services'][number]>,
   job: DeploymentJob | undefined,
@@ -179,10 +163,16 @@ function resolveServiceStatus(
   checkingHealth: boolean,
   healthCheckError: string | undefined
 ): ServiceStatusValue {
-  const matchesDeployed = servicesEqual(service, deployedConfig.services[index]);
-  const matchesDeployment = servicesEqual(service, deploymentConfig?.services[index]);
+  const hostname = service.hostname.trim().toLowerCase();
+  const matchesDeployed = deployedConfig.services.some((candidate) => (
+    serviceConfigurationsEqual(service, candidate)
+  ));
+  const matchesDeployment = deploymentConfig?.services.some((candidate) => (
+    serviceConfigurationsEqual(service, candidate)
+  )) === true;
+  const synchronizedByDeployment = deploymentServiceHostnames.has(hostname);
 
-  if (deploying && matchesDeployment) {
+  if (deploying && matchesDeployment && synchronizedByDeployment) {
     return { label: '发布中', detail: '正在发布这项服务。', tone: 'progress' };
   }
 
@@ -198,19 +188,37 @@ function resolveServiceStatus(
     return { label: '检查失败', detail: healthCheckError, tone: 'error' };
   }
 
-  if (job && matchesDeployment) {
+  if (job && matchesDeployment && synchronizedByDeployment) {
     if (service.enabled === false) {
       return { label: '已停用', detail: '这项服务未启用。', tone: 'neutral' };
     }
-    const result = deploymentByHostname.get(service.hostname.trim().toLowerCase());
+    const result = deploymentByHostname.get(hostname);
     if (result?.healthy) {
       return { label: '运行正常', detail: result.detail, tone: 'success' };
     }
-    if (job.phase === 'failed' || job.phase === 'healthy') {
+    if (job.phase === 'failed') {
       return {
         label: result ? compactFailureLabel(result) : '发布失败',
         detail: result?.detail || job.message,
         tone: 'error'
+      };
+    }
+    if (job.phase === 'healthy') {
+      const retainedResult = result || publishedByHostname.get(hostname);
+      if (retainedResult?.healthy) {
+        return { label: '运行正常', detail: retainedResult.detail, tone: 'success' };
+      }
+      if (retainedResult) {
+        return {
+          label: compactFailureLabel(retainedResult),
+          detail: retainedResult.detail,
+          tone: 'error'
+        };
+      }
+      return {
+        label: '状态未变',
+        detail: '本次发布没有重新检查这项未修改的服务。',
+        tone: 'neutral'
       };
     }
     if (job.phase === 'checking') {
@@ -225,7 +233,7 @@ function resolveServiceStatus(
   if (service.enabled === false) {
     return { label: '已停用', detail: '这项服务未启用。', tone: 'neutral' };
   }
-  const publishedResult = publishedByHostname.get(service.hostname.trim().toLowerCase());
+  const publishedResult = publishedByHostname.get(hostname);
   if (publishedResult?.healthy) {
     return { label: '运行正常', detail: publishedResult.detail, tone: 'success' };
   }
@@ -310,6 +318,7 @@ function ConfigEditor({
   config,
   deployedConfig,
   deploymentConfig,
+  deploymentServiceHostnames,
   job,
   publishedHealth,
   deploying,
@@ -496,9 +505,9 @@ function ConfigEditor({
                 <ServiceStatus
                   value={resolveServiceStatus(
                     service,
-                    index,
                     deployedConfig,
                     deploymentConfig,
+                    deploymentServiceHostnames,
                     deploymentByHostname,
                     publishedByHostname,
                     job,
@@ -540,10 +549,9 @@ function ConfigEditor({
 interface InspectorProps {
   validation: ValidationResponse;
   config: UglinkConfig;
-  job?: DeploymentJob;
 }
 
-function Inspector({ validation, config, job }: InspectorProps) {
+function Inspector({ validation, config }: InspectorProps) {
   return (
     <aside className="inspector">
       <section className="inspector__section">
@@ -569,28 +577,6 @@ function Inspector({ validation, config, job }: InspectorProps) {
           <pre>{prettyConfig(config)}</pre>
         </details>
       </section>
-
-      <section className="inspector__section inspector__section--timeline">
-        <div className="inspector__heading">
-          <div><p className="eyebrow">发布流程</p><h3>发布进度</h3></div>
-          {job && <span className={`phase-pill phase-pill--${job.phase}`}>{job.phase}</span>}
-        </div>
-        {job ? (
-          <ol className="timeline">
-            {job.timeline.map((entry, index) => (
-              <li key={`${entry.phase}-${index}`} className={index === job.timeline.length - 1 ? 'is-current' : 'is-complete'}>
-                <span className="timeline__dot">{index < job.timeline.length - 1 ? <Check size={11} /> : <Circle size={9} fill="currentColor" />}</span>
-                <div><strong>{entry.label}</strong><p>{entry.detail}</p><time>{formatTime(entry.at)}</time></div>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <div className="timeline-empty">
-            <Rocket size={22} />
-            <p><strong>尚未发布</strong><br />发布后，这里会显示各阶段的处理状态。</p>
-          </div>
-        )}
-      </section>
     </aside>
   );
 }
@@ -613,7 +599,7 @@ function SecurityPage({
   return (
     <div className="section-page">
       <div className="page-heading">
-        <div><p className="eyebrow">凭据管理</p><h1>权限与安全</h1><p>查看 Cloudflare 发布目标与 API Token 的本地保护状态。</p></div>
+        <div><p className="eyebrow">凭据管理</p><h1>权限与安全</h1><p>管理 Cloudflare 连接与加密备份。</p></div>
       </div>
       <div className="security-grid">
         <section className="panel security-card">
@@ -625,19 +611,6 @@ function SecurityPage({
               {resetting ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />} 重新配置 API Token
             </button>
           </div>
-        </section>
-        <section className="panel security-card">
-          <span className="security-card__icon"><HardDrive size={21} /></span>
-          <div><h2>持久化配置</h2><p>UGREENlink ID、NAS 登录用户名与服务映射保存在服务器数据目录，不再依赖当前浏览器。</p></div>
-          <span className="status-chip status-chip--success"><Check size={12} /> 已安全保存</span>
-        </section>
-        <section className="panel security-card security-card--wide">
-          <span className="security-card__icon"><ShieldCheck size={21} /></span>
-          <div>
-            <h2>API Token 保护</h2>
-            <p>API Token 由服务端加密保存，浏览器仅持有 HttpOnly 会话标识；重新配置会清除当前服务端凭据。</p>
-          </div>
-          <span className="status-chip status-chip--success"><Check size={12} /> 已启用</span>
         </section>
         <DataManagement
           csrfToken={bootstrap.csrfToken}
@@ -666,6 +639,9 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
   const [validation, setValidation] = useState<ValidationResponse>(() => validateUglinkConfig(initialConfiguration.config));
   const [job, setJob] = useState<DeploymentJob>();
   const [deploymentConfig, setDeploymentConfig] = useState<UglinkConfig>();
+  const [deploymentServiceHostnames, setDeploymentServiceHostnames] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
   const [publishedHealth, setPublishedHealth] = useState<ServiceHealthResponse>();
   const [checkingHealth, setCheckingHealth] = useState(initialHasPublishedServices);
   const [healthCheckError, setHealthCheckError] = useState<string>();
@@ -680,6 +656,7 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
   const [cloudConfigurationBusy, setCloudConfigurationBusy] = useState<'import' | 'dismiss'>();
   const [cloudConfigurationError, setCloudConfigurationError] = useState<string>();
   const healthRequestVersion = useRef(0);
+  const skipNextPublishedHealthCheck = useRef(false);
   const autosaveReady = useRef(false);
   const autosaveQueue = useRef<Promise<unknown>>(Promise.resolve());
   const hasPublishedServices = savedConfig.services.some((service) => service.enabled !== false);
@@ -741,6 +718,11 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
   }, [bootstrap.csrfToken, loadDiagnostics]);
 
   useEffect(() => {
+    if (skipNextPublishedHealthCheck.current) {
+      skipNextPublishedHealthCheck.current = false;
+      setCheckingHealth(false);
+      return;
+    }
     if (!hasPublishedServices) {
       setCheckingHealth(false);
       return;
@@ -768,9 +750,26 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
 
   useEffect(() => {
     if (!job) return;
-    setPublishedHealth({ checkedAt: job.updatedAt, services: job.services });
+    setPublishedHealth((current) => {
+      const previousByHostname = new Map(
+        (current?.services || []).map((service) => [service.hostname.toLowerCase(), service])
+      );
+      const deploymentByHostname = new Map(
+        job.services.map((service) => [service.hostname.toLowerCase(), service])
+      );
+      const activeServices = (deploymentConfig?.services || [])
+        .filter((service) => service.enabled !== false);
+      return {
+        checkedAt: job.updatedAt,
+        services: activeServices.flatMap((service) => {
+          const hostname = service.hostname.trim().toLowerCase();
+          const result = deploymentByHostname.get(hostname) || previousByHostname.get(hostname);
+          return result ? [result] : [];
+        })
+      };
+    });
     if (job.phase === 'healthy' || job.phase === 'failed') void loadDiagnostics(false);
-  }, [job, loadDiagnostics]);
+  }, [deploymentConfig, job, loadDiagnostics]);
 
   const localValidation = useMemo(
     () => validateUglinkConfig(config),
@@ -812,6 +811,11 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
     setBusy('deploy');
     setJob(undefined);
     setDeploymentConfig(nextConfig);
+    setDeploymentServiceHostnames(new Set(
+      servicesRequiringSynchronization(savedConfig, nextConfig, {
+        forceAll: mode === 'overwrite' || password.length > 0
+      }).map((service) => service.hostname.trim().toLowerCase())
+    ));
     setNotice(undefined);
     try {
       const checked = await apiPost<ValidationResponse>('/api/validate', bootstrap.csrfToken, { config: nextConfig });
@@ -825,12 +829,16 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
         mode,
         ...(mode === 'publish' && password ? { password } : {})
       });
+      setDeploymentServiceHostnames(new Set(
+        created.services.map((service) => service.hostname.trim().toLowerCase())
+      ));
       setJob(created);
       void loadDiagnostics(false);
       if (created.phase === 'failed') {
         setNotice({ type: 'error', message: created.message });
       } else {
         if (mode === 'publish') {
+          if (!configsEqual(nextConfig, savedConfig)) skipNextPublishedHealthCheck.current = true;
           setSavedConfig(nextConfig);
           setPassword('');
         }
@@ -973,6 +981,7 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
                   config={config}
                   deployedConfig={savedConfig}
                   deploymentConfig={deploymentConfig}
+                  deploymentServiceHostnames={deploymentServiceHostnames}
                   job={job}
                   publishedHealth={publishedHealth}
                   deploying={busy === 'deploy'}
@@ -984,7 +993,7 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
                   onInspectService={inspectService}
                 />
               </div>
-              <Inspector validation={visibleValidation} config={config} job={job} />
+              <Inspector validation={visibleValidation} config={config} />
             </>
           ) : section === 'diagnostics' ? (
             <DiagnosticsPage

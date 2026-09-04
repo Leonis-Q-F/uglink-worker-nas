@@ -9,7 +9,9 @@ import type {
   TokenGenerator
 } from './ports';
 import { resolveUglinkConfig, validateUglinkConfig } from '../../domain/configuration/validation';
-import type { UglinkConfig } from '../../domain/configuration/model';
+import { defaultConfig } from '../../domain/configuration/defaults';
+import { servicesRequiringSynchronization } from '../../domain/configuration/change-set';
+import type { UglinkConfig, UglinkService } from '../../domain/configuration/model';
 import type {
   DeploymentJob,
   DeploymentMode,
@@ -188,7 +190,10 @@ export function createDeploymentService(dependencies: DeploymentServiceDependenc
     };
   }
 
-  function newJob(config: UglinkConfig, mode: DeploymentMode): DeploymentJob {
+  function newJob(
+    mode: DeploymentMode,
+    synchronizedServices: UglinkService[]
+  ): DeploymentJob {
     const now = new Date().toISOString();
     return {
       id: tokens.create(18),
@@ -202,15 +207,13 @@ export function createDeploymentService(dependencies: DeploymentServiceDependenc
       accountId: target.accountId,
       accountName: target.accountName,
       dashboardUrl: provider.dashboardUrl(target),
-      services: config.services
-        .filter((service) => service.enabled !== false)
-        .map((service) => ({
-          serviceName: service.name,
-          hostname: service.hostname.toLowerCase(),
-          port: service.port,
-          healthy: false,
-          detail: '等待发布'
-        })),
+      services: synchronizedServices.map((service) => ({
+        serviceName: service.name,
+        hostname: service.hostname.toLowerCase(),
+        port: service.port,
+        healthy: false,
+        detail: '等待发布'
+      })),
       timeline: [{
         phase: 'queued',
         label: timelineLabel('queued'),
@@ -244,7 +247,11 @@ export function createDeploymentService(dependencies: DeploymentServiceDependenc
   async function createDeployment(request: DeployRequest): Promise<DeploymentJob> {
     const validated = validateDeployRequest(request);
     const { config, mode } = validated;
-    const job = newJob(config, mode);
+    const previousConfig = (await configuration.read())?.deployed || defaultConfig();
+    const synchronizedServices = servicesRequiringSynchronization(previousConfig, config, {
+      forceAll: mode === 'overwrite' || request.password !== undefined
+    });
+    const job = newJob(mode, synchronizedServices);
     await jobs.save(job);
 
     try {
@@ -280,7 +287,9 @@ export function createDeploymentService(dependencies: DeploymentServiceDependenc
         await jobs.save(job);
       }
 
-      const desiredHostnames = job.services.map((service) => service.hostname);
+      const desiredHostnames = config.services
+        .filter((service) => service.enabled !== false)
+        .map((service) => service.hostname);
       advance(job, 'routing', '正在配置自定义访问域名。');
       await jobs.save(job);
       await provider.reconcileDomains(target, desiredHostnames);
@@ -291,7 +300,7 @@ export function createDeploymentService(dependencies: DeploymentServiceDependenc
       const latest = await provider.latestDeployment(target);
       if (latest) job.cloudflareDeploymentId = latest.id;
       if (job.services.length === 0) {
-        advance(job, 'healthy', '服务已发布，当前没有公开访问入口。');
+        advance(job, 'healthy', '配置已发布，没有需要重新检查的服务入口。');
       } else {
         await health.check(job.services);
         await appendDiagnostics(serviceDiagnostics(job.services, new Date().toISOString(), job));
@@ -299,8 +308,8 @@ export function createDeploymentService(dependencies: DeploymentServiceDependenc
           job,
           job.services.every((service) => service.healthy) ? 'healthy' : 'checking',
           job.services.every((service) => service.healthy)
-            ? '服务已发布，所有 Worker 入口均已生效。'
-            : '服务已发布，正在等待访问域名生效。'
+            ? '服务已发布，本次修改涉及的入口均已生效。'
+            : '服务已发布，正在等待本次修改涉及的入口生效。'
         );
       }
       await configuration.write({
@@ -337,7 +346,7 @@ export function createDeploymentService(dependencies: DeploymentServiceDependenc
       const healthy = job.services.length === 0 || job.services.every((service) => service.healthy);
       const age = Date.now() - new Date(job.createdAt).getTime();
       if (healthy) {
-        advance(job, 'healthy', '服务已发布，所有 Worker 入口均已生效。');
+        advance(job, 'healthy', '服务已发布，本次修改涉及的入口均已生效。');
       } else if (age > HEALTH_TIMEOUT_MS) {
         job.failure = {
           phase: 'checking',
@@ -347,7 +356,7 @@ export function createDeploymentService(dependencies: DeploymentServiceDependenc
         };
         advance(job, 'failed', '服务已发布，但部分访问域名在 15 分钟内仍无法正常使用。');
       } else {
-        advance(job, 'checking', '服务已发布，正在等待访问域名生效。');
+        advance(job, 'checking', '服务已发布，正在等待本次修改涉及的入口生效。');
       }
     } catch (error) {
       job.failure = deploymentFailure(error, job.phase);
