@@ -11,6 +11,14 @@ import type {
   PersistedConfigurationState
 } from './contracts';
 
+// The subset used by the console, supported by both Workers KV and local SQLite.
+export interface ConsoleStore {
+  get(key: string): Promise<string | null>;
+  get<T>(key: string, type: 'json'): Promise<T | null>;
+  put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
+  delete(key: string): Promise<void>;
+}
+
 export interface KvNamespaceReference {
   id: string;
   title: string;

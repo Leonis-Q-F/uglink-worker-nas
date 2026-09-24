@@ -4,7 +4,7 @@
 
 ## 本地开发
 
-建议使用 Node.js 22.12+ 的 22.x 版本和 npm 10+；完整版本约束以 `package.json` 的 `engines` 为准。
+建议使用 Node.js 22.13+ 的 22.x 版本和 npm 10+；完整版本约束以 `package.json` 的 `engines` 为准。
 
 ```bash
 npm ci
@@ -30,6 +30,8 @@ npm run docker:up
 该命令通过 Compose 构建当前源码并启动。`npm run docker:build` 只构建，两者使用相同的 Compose 镜像配置。停止服务使用 `npm run docker:down`，该命令保留数据卷。
 
 源码开发与拉取发布镜像是两条路径。按 README 的 `docker compose up -d --no-build` 启动的是指定镜像，不会重新构建当前源码。
+
+调试生产 Node.js 入口可先运行 `npm run build:console`，再以 `UGLINK_DATA_DIR=./data PORT=5173 npm run start:console` 启动。它使用 SQLite；`npm run dev` 仍使用 Wrangler 的本地开发环境。不要将测试进程指向正在使用的数据卷。
 
 ## 验证
 
@@ -59,11 +61,10 @@ PR 自动运行完整检查；主分支和版本标签的镜像发布也必须�
 src/
   domain/          核心模型、配置规则和代理路由
   application/     控制台及 Gateway 用例编排
-  infrastructure/  Cloudflare、绿联、KV 与加密适配
+  infrastructure/  Cloudflare、绿联、KV、SQLite 与加密适配
   interfaces/      HTTP 入口和 React 界面
 test/              Gateway 与 Console 测试
 scripts/           配置生成、构建辅助、发布审计和浏览器回归
-docker/            容器启动逻辑和本地 Worker 运行配置
 docs/              部署、配置与备份说明
 ```
 

@@ -50,6 +50,10 @@ docker compose up -d --no-build
 
 镜像支持 `linux/amd64` 和 `linux/arm64`。数据保存在 `uglink-data` 卷内；重建容器不会删除该卷。
 
+Docker 控制台由一个 Node.js 进程提供 API 和静态页面，使用内置 SQLite 保存本地数据。Wrangler 只用于源码开发和构建，不随运行镜像启动。云端控制台和 Gateway 仍使用 Workers 与 KV。
+
+如果使用 HTTPS 反向代理，请在 Compose 的 `services.console.environment` 中设置 `UGLINK_PUBLIC_ORIGIN: "https://console.example.com"`，替换为实际控制台来源，不含路径或末尾斜杠。代理需保留 Host；控制台不会信任客户端传入的 `X-Forwarded-*` 来判断来源。此设置用于同源检查和 Secure Cookie，不能替代代理的访问认证。
+
 ### Compose 配置
 
 下列变量写入 Compose 项目目录的 `.env`。完整示例见 [`.env.example`](../.env.example)。
@@ -102,7 +106,9 @@ docker compose up -d --no-build
 
 ## 数据持久化与备份
 
-- `uglink-data` 卷保存自动生成的会话加密密钥、本地 KV、加密 API Token、服务配置与诊断记录。
+- `uglink-data` 卷保存自动生成的会话加密密钥和 `console.sqlite`，包含加密 API Token、服务配置与诊断记录。SQLite 的 WAL 文件也属于运行数据，备份时应停止控制台并备份整个卷。
+- 从旧版 Wrangler 容器升级时，首次启动会自动读取 `/data/wrangler/v3/kv`，在事务中导入未过期记录并保留原密钥和旧文件。迁移完成后不会重复导入；缺失文件或不支持的数据格式会导致启动失败，不会静默重置配置。请先停止旧容器，不要让新旧版本同时写同一数据卷。
+- 升级前应备份整个数据卷。若回退旧镜像，它只会读取旧 KV 文件，看不到升级后写入 SQLite 的更改；应配合升级前的卷备份回退，或使用应用内加密备份转移最新配置。
 - 已发布的非秘密配置同步到目标 Worker 的 `UGLINK_CACHE` KV；API Token、NAS 密码和本地草稿不会同步。
 - 更新时使用 `docker compose pull && docker compose up -d`；不要执行 `docker compose down --volumes` 或手动删除 `uglink-data`。
 - 加密备份包含 Cloudflare 连接、UGREENlink ID、NAS 登录用户名、服务配置和诊断记录，需要至少 12 个字符的独立备份密码。
@@ -124,7 +130,7 @@ docker compose start console
 
 ## 将管理控制台部署到 Cloudflare
 
-此方式不需要 Docker。建议使用 Node.js 22.12+ 的 22.x 版本和 npm 10+。
+此方式不需要 Docker。建议使用 Node.js 22.13+ 的 22.x 版本和 npm 10+。
 
 ```bash
 git clone https://github.com/Leonis-Q-F/uglink-worker-nas.git

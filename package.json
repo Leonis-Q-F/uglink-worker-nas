@@ -1,10 +1,10 @@
 {
   "name": "uglink-worker-nas",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "license": "MIT",
   "engines": {
-    "node": "^20.19.0 || >=22.12.0",
+    "node": "^22.13.0 || >=24.0.0",
     "npm": ">=10"
   },
   "scripts": {
@@ -22,7 +22,7 @@
     "typecheck": "npm run gateway:bundle && tsc --noEmit",
     "build": "npm run build:gateway && npm run build:console",
     "build:gateway": "npm run config:generate && wrangler deploy --config wrangler.gateway.generated.json --dry-run",
-    "build:console": "npm run gateway:bundle && vite build && node scripts/sanitize-console-build.mjs",
+    "build:console": "npm run gateway:bundle && vite build && node scripts/build-node-console.mjs && node scripts/sanitize-console-build.mjs",
     "check": "npm run audit:public && npm run config:validate && npm test && npm run typecheck && npm run build",
     "verify:deployment": "node scripts/validate-deployment-config.mjs",
     "deploy": "npm run deploy:console",
@@ -32,14 +32,14 @@
     "docker:build": "docker compose build",
     "docker:up": "docker compose up --detach --build",
     "docker:down": "docker compose down",
-    "secret:key": "node -e \"console.log(require('node:crypto').randomBytes(32).toString('base64url'))\""
+    "secret:key": "node -e \"console.log(require('node:crypto').randomBytes(32).toString('base64url'))\"",
+    "start:console": "node dist/node-console/index.mjs"
   },
   "dependencies": {
     "jsencrypt": "^3.5.4",
     "lucide-react": "1.28.0",
     "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "wrangler": "4.118.0"
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.50.0",
@@ -48,11 +48,13 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "@vitejs/plugin-react": "6.0.5",
+    "esbuild": "0.28.1",
     "playwright-core": "1.62.1",
     "tsx": "^4.20.6",
     "typescript": "7.0.2",
     "vite": "8.2.0",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "wrangler": "4.118.0"
   },
   "overrides": {
     "undici": "7.29.0"

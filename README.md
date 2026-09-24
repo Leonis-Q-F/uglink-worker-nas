@@ -109,7 +109,7 @@ flowchart LR
 
 API Token 和 NAS 密码由用户在浏览器输入并提交，不持久化到浏览器存储。API Token 加密保存在控制台服务端会话中，NAS 密码保存在 Gateway 的 Worker Secret 中。
 
-访问流量经过 Cloudflare 和绿联服务；配置及代理会话使用各自的 KV 存储。加密备份包含 Cloudflare 连接等敏感信息，但不包含无法回读的 NAS 密码。详细边界见 [安全策略](SECURITY.md)。
+访问流量经过 Cloudflare 和绿联服务；控制台配置存入本地 SQLite 或云端 KV，网关代理会话使用 Cloudflare KV。加密备份包含 Cloudflare 连接等敏感信息，但不包含无法回读的 NAS 密码。详细边界见 [安全策略](SECURITY.md)。
 
 ## 更新与备份
 
@@ -135,7 +135,7 @@ docker compose up -d --no-build
 
 ## 开发与贡献
 
-项目使用 TypeScript、React、Vite、Cloudflare Workers 和 KV。建议使用 Node.js 22.12+ 的 22.x 版本和 npm 10+，完整版本约束见 `package.json`。
+项目使用 TypeScript、React 和 Vite；Docker 控制台使用 Node.js 与 SQLite，云端使用 Cloudflare Workers 与 KV。建议使用 Node.js 22.13+ 的 22.x 版本和 npm 10+，完整版本约束见 `package.json`。
 
 ```bash
 git clone https://github.com/Leonis-Q-F/uglink-worker-nas.git
@@ -161,11 +161,10 @@ npm run qa:browser  # 控制台运行后，执行模拟 API 的浏览器回归
 src/
 ├── domain/          # 核心模型、配置规则与代理路由
 ├── application/     # 控制台与 Gateway 用例编排
-├── infrastructure/  # Cloudflare、绿联、KV 与加密适配
+├── infrastructure/  # Cloudflare、绿联、KV、SQLite 与加密适配
 └── interfaces/      # HTTP 入口与 React 界面
 test/                # Gateway 与 Console 测试
 scripts/             # 配置生成、构建辅助、审计与浏览器回归
-docker/              # 容器启动与 Worker 运行配置
 docs/                # 部署、配置与备份说明
 assets/              # 界面预览与配置说明图片
 ```

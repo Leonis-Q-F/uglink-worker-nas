@@ -1,3 +1,4 @@
+import type { ConsoleStore } from '../../application/console/ports';
 import type { DiagnosticLogRepository } from '../../application/console/ports';
 import type { DiagnosticEntry } from '../../domain/deployment/model';
 import type { WorkerTarget } from '../../domain/deployment/model';
@@ -32,7 +33,7 @@ function isDiagnosticEntry(value: unknown): value is DiagnosticEntry {
 }
 
 export function createKvDiagnosticLogRepository(
-  namespace: KVNamespace,
+  namespace: ConsoleStore,
   sessionId: string,
   target: Pick<WorkerTarget, 'accountId' | 'workerName'>
 ): DiagnosticLogRepository {

@@ -2,7 +2,7 @@
 
 ## 控制台配置与本地文件
 
-控制台将草稿和已发布配置存入自身 KV，并在发布时将非秘密配置同步到目标 Gateway 的 KV，供以后确认导入。它不会自动修改源码目录中的 `uglink.config.json`。
+控制台将草稿和已发布配置存入本地 SQLite（Docker）或自身 KV（云端），并在发布时将非秘密配置同步到目标 Gateway 的 KV，供以后确认导入。它不会自动修改源码目录中的 `uglink.config.json`。
 
 `uglink.config.json` 是直接使用 Wrangler 部署 Gateway 时的输入文件。`npm run config:generate` 读取它和 `wrangler.gateway.jsonc`，生成 `wrangler.gateway.generated.json`。
 
@@ -47,7 +47,7 @@
 | `wrangler.jsonc` | 控制台开发和云端部署 |
 | `wrangler.gateway.jsonc` | 独立部署 Gateway 的基础配置 |
 | `wrangler.gateway.bundle.jsonc` | 将 Gateway 打包到控制台中，供控制台发布 |
-| `docker/wrangler.json` | Docker 内运行已构建的控制台 |
+| `src/interfaces/http/console/node-entry.ts` | Docker 的 Node.js 启动入口及旧数据迁移 |
 | `.env` | Docker Compose 的变量替换输入 |
 | `.dev.vars` | 本地 Wrangler/Vite 开发使用的密钥 |
 

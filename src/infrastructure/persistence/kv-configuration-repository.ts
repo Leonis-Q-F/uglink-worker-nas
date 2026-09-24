@@ -1,3 +1,4 @@
+import type { ConsoleStore } from '../../application/console/ports';
 import type { ConfigurationRepository } from '../../application/console/ports';
 import type { PersistedConfigurationState } from '../../application/console/contracts';
 import type { WorkerTarget } from '../../domain/deployment/model';
@@ -7,7 +8,7 @@ function storageKey(target: WorkerTarget): string {
 }
 
 export function createKvConfigurationRepository(
-  namespace: KVNamespace,
+  namespace: ConsoleStore,
   target: WorkerTarget
 ): ConfigurationRepository {
   const key = storageKey(target);

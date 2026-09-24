@@ -1,3 +1,4 @@
+import type { ConsoleStore } from '../../application/console/ports';
 import type { CloudflareConnection } from '../../application/console/contracts';
 import { ApplicationError } from '../../application/common/application-error';
 import type { WorkerTarget } from '../../domain/deployment/model';
@@ -24,7 +25,7 @@ export interface SessionHandle {
 }
 
 export interface ConsoleSessionEnvironment {
-  CONSOLE_SESSIONS: KVNamespace;
+  CONSOLE_SESSIONS: ConsoleStore;
   SESSION_ENCRYPTION_KEY: string;
 }
 

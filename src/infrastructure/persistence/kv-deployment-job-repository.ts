@@ -1,10 +1,11 @@
+import type { ConsoleStore } from '../../application/console/ports';
 import type { DeploymentJobRepository } from '../../application/console/ports';
 import type { DeploymentJob } from '../../domain/deployment/model';
 
 const JOB_TTL_SECONDS = 60 * 60 * 24 * 30;
 
 export function createKvDeploymentJobRepository(
-  namespace: KVNamespace,
+  namespace: ConsoleStore,
   sessionId: string
 ): DeploymentJobRepository {
   const key = (id: string) => `deployment:${sessionId}:${id}`;
