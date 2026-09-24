@@ -17,7 +17,7 @@
 ## Docker
 
 - 镜像构建上下文会排除 `.dev.vars`、`.env`、Wrangler 状态和生成目录；不要使用 `--build-arg` 传递任何密钥。
-- Compose 默认只绑定 `127.0.0.1`。在 NAS 上改为局域网监听前，应确认端口不会从公网访问。
+- Compose 默认监听 `0.0.0.0:5173`，可从主机的其他网络接口访问。请仅在可信局域网使用；仅供本机访问时，在 `.env` 中设置 `UGLINK_BIND_ADDRESS=127.0.0.1`。
 - Compose 默认使用 Docker 管理的 `uglink-data` 卷，避免宿主机目录权限迫使容器以 root 身份运行。
 - `uglink-data` 卷包含会话加密密钥和加密后的 Cloudflare 连接。备份、迁移和删除该卷时应按敏感数据处理；不要执行 `docker compose down --volumes`。
 - 如需远程访问控制台，应放在具备身份验证和 HTTPS 的反向代理或 Cloudflare Access 后面。
@@ -33,4 +33,6 @@
 
 ## 报告漏洞
 
-请使用仓库的私密安全报告渠道联系维护者。不要在公开讨论区提交密码、Token、Cookie、真实远程地址或可复现的个人服务链接。
+优先使用仓库 Security 页中的 [Report a vulnerability](https://github.com/Leonis-Q-F/uglink-worker-nas/security/advisories/new) 私密报告入口。如果该入口不可用，请先提交不含漏洞细节的 Issue，请维护者提供私密联系渠道。
+
+不要在公开讨论区提交密码、Token、Cookie、真实远程地址、可复现的个人服务链接或尚未修复漏洞的利用步骤。

@@ -22,7 +22,7 @@ RUN npm ci --omit=dev --no-audit --no-fund \
 
 FROM node:22-bookworm-slim AS runtime
 
-LABEL org.opencontainers.image.title="UGLINK Worker Gateway" \
+LABEL org.opencontainers.image.title="UGLINK Worker NAS" \
       org.opencontainers.image.description="Local management console for deploying UGLINK gateway Workers" \
       org.opencontainers.image.licenses="MIT"
 

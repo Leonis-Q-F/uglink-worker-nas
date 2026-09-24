@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { resolveUglinkConfig } from '../../src/domain/configuration/validation';
 import { generateWranglerConfig } from '../../src/infrastructure/cloudflare/worker-configuration';
 
@@ -83,4 +84,11 @@ test('validation rejects URLs and invalid UGREENlink IDs', () => {
     uglink: { id: 'https://device.example.test', username: 'user' },
     services: [{ name: 'api', hostname: 'api.example.com', port: 8317 }]
   }), /UGREENlink ID/u);
+});
+
+test('the shipped Wrangler configuration enables Smart Placement when generated', async () => {
+  const shippedConfig = JSON.parse(readFileSync('wrangler.gateway.jsonc', 'utf8'));
+  const config = resolveUglinkConfig({ version: 2, uglink: { id: '', username: '' }, services: [] });
+  const generated = await generateWranglerConfig(shippedConfig, config);
+  assert.deepEqual(generated.placement, { mode: 'smart' });
 });

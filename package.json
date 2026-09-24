@@ -1,6 +1,6 @@
 {
   "name": "uglink-worker-nas",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "license": "MIT",
   "engines": {
@@ -29,8 +29,8 @@
     "deploy:console": "npm run verify:deployment && npm run build:console && wrangler deploy --config wrangler.jsonc",
     "deploy:gateway": "npm run config:generate && wrangler deploy --config wrangler.gateway.generated.json",
     "qa:browser": "node scripts/browser-qa.mjs",
-    "docker:build": "docker build --tag uglink-worker-nas:local .",
-    "docker:up": "docker compose up --detach",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up --detach --build",
     "docker:down": "docker compose down",
     "secret:key": "node -e \"console.log(require('node:crypto').randomBytes(32).toString('base64url'))\""
   },

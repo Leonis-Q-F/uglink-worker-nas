@@ -1,285 +1,179 @@
+<div align="center">
+  <h1>UGLINK Worker NAS</h1>
+  <p><strong>用自己的域名，访问绿联 NAS 上的 Web 服务。</strong></p>
+  <p>基于 Cloudflare Workers 与 UGREENlink 的远程访问网关，配有可自托管的管理控制台。</p>
+  <p>
+    <a href="https://github.com/Leonis-Q-F/uglink-worker-nas/actions/workflows/check.yml"><img src="https://img.shields.io/github/actions/workflow/status/Leonis-Q-F/uglink-worker-nas/check.yml?branch=main&style=flat-square&label=checks" alt="检查状态" /></a>
+    <a href="https://github.com/Leonis-Q-F/uglink-worker-nas/releases/latest"><img src="https://img.shields.io/github/v/release/Leonis-Q-F/uglink-worker-nas?style=flat-square" alt="最新版本" /></a>
+    <img src="https://img.shields.io/badge/Cloudflare-Workers-F38020?style=flat-square&logo=cloudflare&logoColor=white" alt="Cloudflare Workers" />
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License" /></a>
+  </p>
+  <p>
+    <a href="#快速开始">快速开始</a> ·
+    <a href="docs/deployment.md">使用指南</a> ·
+    <a href="https://github.com/Leonis-Q-F/uglink-worker-nas/releases">更新记录</a> ·
+    <a href="CONTRIBUTING.md">参与贡献</a>
+  </p>
+</div>
+
+## 它能做什么
+
+为绿联 NAS 上不同端口的 Web 服务分配独立子域名，通过一个控制台管理配置并发布到 Cloudflare。家庭宽带无需公网 IP，也无需在路由器上配置入站端口转发。
+
+例如，将笔记服务映射到 `notes.example.com`，将另一个 Web 应用映射到 `app.example.com`。访问者使用域名，Gateway 根据配置转发到对应的 NAS 端口。
+
+项目沿用绿联 UGREENlink 远程通道，提供域名入口和管理能力；不会绕过官方中继，也不保证提高传输速度。
+
+| 能力 | 你可以做什么 |
+| --- | --- |
+| 服务映射 | 为每项 Web 服务配置独立域名与 NAS 端口，启用或停用映射 |
+| 配置与发布 | 保存草稿，在控制台发布 Gateway 和自定义域名，按配置差异同步服务 |
+| 状态与诊断 | 检查 Worker 入口、域名识别情况，查看错误阶段与诊断记录 |
+| 云端配置恢复 | 连接已有 Gateway 时，检测并确认导入已发布配置 |
+| 加密备份 | 导出和恢复 Cloudflare 连接、服务配置与诊断记录 |
+
+## 控制台预览
+
+NAS 连接、服务映射和配置检查集中在一个页面：
+
 <p align="center">
-  <img src="https://img.icons8.com/fluency/96/cloud-link.png" alt="UGLINK Logo" width="96" />
-  <br />
-  <strong style="font-size: 1.5em;">UGLINK Worker NAS</strong>
+  <img src="assets/console-preview.png" width="1000" alt="控制台中的 NAS 连接信息、服务映射与配置检查" />
 </p>
 
-<div align="center">
+<details>
+  <summary>查看故障诊断界面</summary>
+  <p>按服务查看入口状态、错误码和诊断记录。</p>
+  <img src="assets/console-diagnostics.png" width="1000" alt="控制台中的服务检查结果与错误记录" />
+</details>
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Container Image](https://ghcr-badge.egpl.dev/leonis-q-f/uglink-worker-nas/latest_tag?trim=major&label=latest)](https://github.com/Leonis-Q-F/uglink-worker-nas/pkgs/container/uglink-worker-nas)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D22.12-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
-[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com)
-
-</div>
-
-<div align="center">
-  <h3>
-    <a href="#快速开始">快速开始</a>
-    <span> · </span>
-    <a href="#docker-部署推荐">Docker 部署</a>
-    <span> · </span>
-    <a href="#配置说明">配置说明</a>
-    <span> · </span>
-    <a href="https://github.com/Leonis-Q-F/uglink-worker-nas/releases">更新记录</a>
-    <span> · </span>
-    <a href="SECURITY.md">安全策略</a>
-  </h3>
-</div>
-
-<br />
-
-## 为什么做这个项目？
-
-绿联 NAS 的远程访问功能 (UGLINK) 体验不够理想：依赖官方中转服务器、速度受限、不支持自定义域名。而大多数家庭宽带没有公网 IP，传统的 DDNS + 端口转发方案也难以适用。
-
-我们希望有一种方式，**不需要公网 IP、不需要复杂的网络配置**，就能通过自己的域名稳定地访问 NAS 上运行的各种服务。
-
-UGLINK Worker NAS 的做法是：利用绿联已有的远程访问通道获取代理凭证，再通过 Cloudflare Workers 把流量转发到 NAS —— 相当于把 Cloudflare 的全球边缘网络变成了你的 NAS 入口。
-
-**它的特点：**
-
-- **零门槛** — Cloudflare 免费计划就够用，不需要公网 IP
-- **可视化操作** — 一个 Web 控制台搞定所有配置和部署，不需要碰命令行
-- **安全** — 密码和 Token 加密存储在服务端，不会出现在浏览器
-- **云端恢复** — 连接已有 UGLINK Worker 时，检测并确认导入 Cloudflare KV 中的已发布配置
-- **自托管** — 数据完全在你自己手里，Docker 一行命令启动
-- **开源** — MIT 协议，随意使用和修改
-
-## 工作原理
-
-```
-                   你的浏览器
-                       │
-                       ▼
-           ┌───────────────────────┐
-           │   Cloudflare Workers  │  ← 全球边缘网络
-           │   (Gateway Worker)    │
-           └───────────┬───────────┘
-                       │  UGLINK 远程代理通道
-                       ▼
-           ┌───────────────────────┐
-           │     绿联 NAS          │  ← 你的本地服务
-           │  (管理面板/文件/媒体)    │
-           └───────────────────────┘
-```
-
-项目包含两个组件：
-
-| 组件 | 部署位置 | 说明 |
-|------|---------|------|
-| **Console 管理控制台** | 本地 Docker 或 Cloudflare | Web UI，配置连接信息、管理服务映射、一键部署 |
-| **Gateway Worker** | Cloudflare | 反向代理，接收请求后通过 UGLINK 通道转发到 NAS |
+截图来自实际控制台，使用模拟账户与服务数据，不代表真实 NAS 的连通性。
 
 ## 快速开始
 
-### 前置条件
+### 准备工作
 
-- 一台绿联 NAS，已启用远程访问（UGLINK）
-- 一个 [Cloudflare 账户](https://dash.cloudflare.com/sign-up)（免费计划即可）
-- 一个自备并已托管到 Cloudflare 的域名；每项 NAS 服务需要分配独立子域名，才能实现多服务访问
-- Docker 和 Docker Compose（用于本地部署管理控制台）
+- 一台已启用 UGREENlink 远程访问的绿联 NAS，以及 NAS 本地登录账号。
+- Cloudflare 账户和一个已托管到 Cloudflare 的自有域名，每个服务使用独立子域名。
+- 限定到目标账户、具有 `Workers Scripts: Edit` 和 `Workers KV Storage: Edit` 权限的 API Token。
+- Docker 和 Docker Compose，用于运行管理控制台。
 
-### 获取 Cloudflare Account ID
+Account ID 和 Token 的获取方法见 [账户与权限配置](docs/deployment.md#cloudflare-账户与权限)。
 
-登录 [Cloudflare Dashboard](https://dash.cloudflare.com)，进入 **Workers & Pages** 页面，在右侧即可找到你的 Account ID：
+### 启动控制台
 
-<p align="center">
-  <img src="assets/cloudflare-account-id.png" alt="在 Cloudflare Workers & Pages 页面找到 Account ID" width="720" />
-</p>
-
-### 创建 API Token
-
-前往 [API Tokens](https://dash.cloudflare.com/profile/api-tokens) 页面创建一个自定义 Token，所需权限如下：
-
-<p align="center">
-  <img src="assets/cloudflare-api-token-permissions.png" alt="API Token 权限配置" width="720" />
-</p>
-
-> [!WARNING]
-> **不要使用 Global API Key。** 只需要授予以下最小权限，并把范围限制到目标账户：
->
-> | 权限 | 级别 |
-> |------|------|
-> | Account / Workers Scripts | Edit |
-> | Account / Workers KV Storage | Edit |
-
----
-
-### Docker 部署（推荐）
-
-适合在绿联 NAS 或任何 Docker 环境上运行。
+在空目录下载配置并启动发布镜像：
 
 ```bash
-# 1. 创建项目目录
-mkdir uglink && cd uglink
-
-# 2. 下载 compose 配置
-cat > compose.yaml << 'EOF'
-name: uglink
-
-services:
-  console:
-    image: ghcr.io/leonis-q-f/uglink-worker-nas:latest
-    init: true
-    restart: unless-stopped
-    ports:
-      - "5173:8787"
-    volumes:
-      - uglink-data:/data
-    read_only: true
-    tmpfs:
-      - /tmp:size=64m,mode=1777
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-
-volumes:
-  uglink-data:
-    name: uglink-data
-EOF
-
-# 3. 启动
-docker compose up -d
+mkdir uglink
+cd uglink
+curl -fL https://raw.githubusercontent.com/Leonis-Q-F/uglink-worker-nas/main/compose.yaml -o compose.yaml
+docker compose up -d --no-build
 ```
 
-打开 `http://设备地址:5173`，按照界面引导完成配置即可。控制台数据保存在 Docker 管理的 `uglink-data` 卷中，删除或更新容器不会清除配置，也不需要手动调整宿主机目录权限。
+打开 `http://设备地址:5173`，依次完成：
 
-> [!TIP]
-> 镜像支持 `linux/amd64` 和 `linux/arm64` 架构，可直接在绿联 NAS 的 Docker 中运行。
+1. 连接 Cloudflare 账户，选择目标 Worker 名称。
+2. 填写 UGREENlink ID、NAS 本地登录用户名和密码。
+3. 添加服务域名与 NAS 端口，检查配置并发布。
 
-### 从源码部署
+[Docker 镜像](https://github.com/Leonis-Q-F/uglink-worker-nas/pkgs/container/uglink-worker-nas)支持 `linux/amd64` 和 `linux/arm64`。配置保存在 `uglink-data` 卷中，重建容器不会删除该卷。
+
+> [!IMPORTANT]
+> 控制台默认监听所有网络接口，仅供可信局域网使用。远程访问应配置身份验证和 HTTPS。映射到公网的 NAS 应用也应保留自身认证，敏感服务建议配置 Cloudflare Access。
+
+不希望在本地运行 Docker，也可以 [将控制台部署到 Cloudflare](docs/deployment.md#将管理控制台部署到-cloudflare)。
+
+## 如何运行
+
+```mermaid
+flowchart LR
+    A[浏览器] --> B[Cloudflare Gateway Worker]
+    B --> C[绿联 UGREENlink 远程通道]
+    C --> D[NAS Web 服务]
+    E[管理控制台] -.配置与发布.-> B
+```
+
+| 组件 | 运行位置 | 职责 |
+| --- | --- | --- |
+| 管理控制台 | 本地 Docker 或 Cloudflare | 配置、发布、备份与诊断 |
+| Gateway Worker | Cloudflare | 获取绿联代理会话，按域名转发请求 |
+
+本地控制台不承载 NAS 访问流量。发布完成后，Gateway 在 Cloudflare 上独立运行。
+
+## 使用边界与数据安全
+
+- **协议与兼容性**：面向 HTTP/HTTPS Web 服务，不是通用 TCP/UDP 隧道。依赖绿联远程接口及登录流程，固件或上游接口变化可能影响兼容性。
+- **文件与实时连接**：大文件上传、长时间下载、WebSocket 和媒体播放需要按目标应用实测，目前没有覆盖所有应用和固件的兼容性保证。
+- **平台配额**：可使用 Cloudflare 免费计划部署，但请求、计算和 KV 等资源受 [平台配额](https://developers.cloudflare.com/workers/platform/limits/)限制。
+- **检查范围**：Worker 入口正常，只表示入口可访问且域名已被识别，不代表 NAS 登录或后端应用一定正常。
+
+API Token 和 NAS 密码由用户在浏览器输入并提交，不持久化到浏览器存储。API Token 加密保存在控制台服务端会话中，NAS 密码保存在 Gateway 的 Worker Secret 中。
+
+访问流量经过 Cloudflare 和绿联服务；配置及代理会话使用各自的 KV 存储。加密备份包含 Cloudflare 连接等敏感信息，但不包含无法回读的 NAS 密码。详细边界见 [安全策略](SECURITY.md)。
+
+## 更新与备份
+
+更新前查看 [Release 说明](https://github.com/Leonis-Q-F/uglink-worker-nas/releases)，然后执行：
+
+```bash
+docker compose pull
+docker compose up -d --no-build
+```
+
+更新控制台不会自动更新已发布的 Gateway。涉及网关变更时，在更新后的控制台进入「故障诊断 → 覆盖部署」，即可使用已发布配置更新网关。
+
+请保留 `uglink-data` 卷；迁移和恢复前先做好备份。操作步骤见 [数据持久化与备份](docs/deployment.md#数据持久化与备份)。
+
+## 文档
+
+| 文档 | 内容 |
+| --- | --- |
+| [部署指南](docs/deployment.md) | Cloudflare 权限、Docker 设置、云端部署、更新与备份 |
+| [配置说明](docs/configuration.md) | 控制台配置与本地文件的区别、Gateway 字段及各配置文件用途 |
+| [贡献指南](CONTRIBUTING.md) | 开发环境、源码分层、测试和提交约定 |
+| [安全策略](SECURITY.md) | 凭证处理、服务暴露边界与漏洞报告方式 |
+
+## 开发与贡献
+
+项目使用 TypeScript、React、Vite、Cloudflare Workers 和 KV。建议使用 Node.js 22.12+ 的 22.x 版本和 npm 10+，完整版本约束见 `package.json`。
 
 ```bash
 git clone https://github.com/Leonis-Q-F/uglink-worker-nas.git
 cd uglink-worker-nas
 npm ci
-npm run deploy:console
+npm run dev
 ```
 
-> 需要先通过 `wrangler login` 登录 Cloudflare。
-
-## 配置说明
-
-### uglink.config.json
-
-Gateway Worker 的核心配置，由控制台自动生成：
-
-```jsonc
-{
-  "version": 2,
-  "uglink": {
-    "id": "your-uglink-id",
-    "username": "your-nas-login-username"
-  },
-  "services": [
-    {
-      "name": "nas-admin",
-      "hostname": "nas.example.com",
-      "port": 8443,
-      "enabled": true
-    }
-  ]
-}
-```
-
-`uglink.id` 是设备的 UGREENlink ID；`uglink.username` 必须填写绿联 NAS 网页端使用的本地登录用户名。两者只有在你实际设置为同名时才相同。NAS 密码更新后需要在控制台重新填写并发布，因为 Cloudflare Worker Secret 无法回读或随备份恢复。
-
-### 登录与 401 排查
-
-网关登录和后端应用登录是两个独立层级：Worker 使用绿联 NAS 账号建立 UGREENlink 代理会话；思源笔记等应用仍可要求自己的锁屏密码或访问授权码。浏览器首次打开思源时跳转到 `/check-auth` 属于正常的思源认证流程，应填写思源自己的访问授权码，而不是 NAS 登录密码。
-
-命令行客户端的 User-Agent 不是浏览器时，思源可能直接返回 `401` 和 `Auth failed [session]`，不会展示登录页。这代表请求已经到达思源内核，并不表示绿联账号登录失败。请用浏览器确认实际访问结果。
-
-### 环境变量
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `UGLINK_BIND_ADDRESS` | 绑定地址 | `0.0.0.0` |
-| `UGLINK_CONSOLE_PORT` | 控制台端口 | `5173` |
-| `UGLINK_IMAGE` | Docker 镜像 | `ghcr.io/leonis-q-f/uglink-worker-nas:latest` |
-| `SESSION_ENCRYPTION_KEY` | 会话加密密钥（可选，自动生成） | 自动生成 |
-
-### 数据持久化与备份
-
-- `uglink-data` 卷保存自动生成的会话加密密钥、本地 KV、加密 API Token、服务配置与诊断记录。
-- 已发布的非秘密配置同步到目标 Worker 的 `UGLINK_CACHE` KV；API Token、NAS 密码和本地草稿不会同步。
-- 更新时使用 `docker compose pull && docker compose up -d`；不要执行 `docker compose down --volumes` 或手动删除 `uglink-data`。
-- 加密备份包含 Cloudflare 连接、UGREENlink ID、NAS 登录用户名、服务配置和诊断记录，需要至少 12 个字符的独立备份密码。
-- NAS 登录密码由 Cloudflare Worker Secret 保存，Cloudflare 不允许读取 Secret 明文，因此不会进入备份文件。
-- 完整灾难恢复应停止控制台后成组备份整个卷；卷备份和应用导出的加密备份都应按敏感数据保管。
-
-完整卷备份示例：
+开发服务器默认使用 `http://127.0.0.1:5173`。若 Docker 控制台已占用端口，请先停止它或调整端口。通过 Docker 运行当前源码可使用 `npm run docker:up`，该命令会构建本地源码。
 
 ```bash
-mkdir -p backup
-docker compose stop console
-docker run --rm -v uglink-data:/data:ro -v "$PWD/backup:/backup" alpine \
-  tar czf /backup/uglink-data.tgz -C /data .
-docker compose start console
+npm test            # Gateway 和 Console 测试
+npm run check       # 审计、配置校验、测试、类型检查与构建
+npm run qa:browser  # 控制台运行后，执行模拟 API 的浏览器回归
 ```
 
-如需直接管理宿主机文件，可以把卷改为 `/volume1/docker/uglink:/data` 等绝对路径；该高级方案需要提前为容器内 UID/GID `1000:1000` 配置写入权限。
+浏览器路径等环境设置见 [贡献指南](CONTRIBUTING.md#验证)。PR 和镜像发布均运行完整检查，本地或模拟测试不能替代真实 NAS 验证。
 
-## 本地开发
+<details>
+  <summary>源码结构</summary>
 
-```bash
-npm ci             # 安装依赖
-npm run dev        # 启动控制台开发服务器
-npm run dev:gateway    # 启动 Gateway Worker 开发模式
-npm test           # 运行测试
-npm run typecheck  # 类型检查
-npm run check      # 完整检查（审计 + 测试 + 类型 + 构建）
-```
-
-## 项目架构
-
-```
+```text
 src/
-├── domain/            # 领域层 — 核心业务模型与规则
-│   ├── configuration/     # 配置校验
-│   ├── deployment/        # 部署流程模型
-│   └── proxy/             # 代理路由
-├── application/       # 应用层 — 用例编排
-│   ├── console/           # 控制台（连接、部署）
-│   └── gateway/           # 网关请求处理
-├── infrastructure/    # 基础设施层 — 外部服务适配
-│   ├── cloudflare/        # Cloudflare API
-│   ├── persistence/       # KV 存储
-│   ├── security/          # 会话加密
-│   └── ugreen/            # 绿联代理通信
-└── interfaces/        # 接口层
-    ├── http/              # Worker 入口（Console / Gateway）
-    └── web/               # React 前端控制台
+├── domain/          # 核心模型、配置规则与代理路由
+├── application/     # 控制台与 Gateway 用例编排
+├── infrastructure/  # Cloudflare、绿联、KV 与加密适配
+└── interfaces/      # HTTP 入口与 React 界面
+test/                # Gateway 与 Console 测试
+scripts/             # 配置生成、构建辅助、审计与浏览器回归
+docker/              # 容器启动与 Worker 运行配置
+docs/                # 部署、配置与备份说明
+assets/              # 界面预览与配置说明图片
 ```
 
-**技术栈：** TypeScript · React 19 · Vite · Cloudflare Workers · Cloudflare KV · Wrangler · Docker
+</details>
 
-## 安全
+欢迎提交 [Issue](https://github.com/Leonis-Q-F/uglink-worker-nas/issues) 和 Pull Request。具体故障的排查过程放在对应 Issue，安全问题按 [私密报告方式](SECURITY.md#报告漏洞)处理。
 
-> [!IMPORTANT]
-> 通过 Custom Domain 暴露 NAS 服务到公网存在风险。请务必阅读 [SECURITY.md](SECURITY.md)。
+## 许可证与致谢
 
-- 绿联密码仅存储在 Worker Secret，API Token 加密存储在服务端会话
-- 绿联代理会话与后端应用会话相互独立；建议为思源等应用保留自己的强密码
-- Docker 默认监听所有本机网络接口；请仅在可信局域网使用，远程访问时必须配置 HTTPS 和访问控制
-- 不要使用 Global API Key，不要把密码提交到 Git
-- 远程访问控制台请配合反向代理 + HTTPS 或 [Cloudflare Access](https://www.cloudflare.com/products/zero-trust/access/)
-
-## 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-```bash
-# 提交前请通过完整检查
-npm run check
-```
-
-## 许可协议
-
-[MIT](LICENSE)
-
-## 致谢
-
-感谢 [linuxdo](https://linux.do/) 社区的讨论、分享与反馈。
+本项目使用 [MIT 许可证](LICENSE)。感谢 [linux.do](https://linux.do/) 社区的讨论、分享与反馈，以及参与测试和贡献代码的朋友。

@@ -10,6 +10,36 @@ interface HealthFailure {
   httpStatus?: number;
 }
 
+function networkFailure(error: unknown): HealthFailure | undefined {
+  // Node fetch may wrap DNS errors in cause; workerd may only expose an opaque
+  // internal error. Do not infer DNS failure unless the error identifies it.
+  const seen = new Set<unknown>();
+  for (let current = error; current && typeof current === 'object' && !seen.has(current);) {
+    seen.add(current);
+    const { name, code, message, cause } = current as {
+      name?: unknown; code?: unknown; message?: unknown; cause?: unknown;
+    };
+    if (name === 'TimeoutError') {
+      return {
+        code: 'service_entry_timeout',
+        detail: '连接 Worker 服务入口超时，请检查控制台所在网络的 DNS 和 HTTPS 连通性',
+        stage: 'service_entry'
+      };
+    }
+    if ((typeof code === 'string' && ['ENOTFOUND', 'EAI_AGAIN', 'EAI_NODATA'].includes(code))
+      || (typeof message === 'string'
+        && /DNS lookup failed|No address associated with hostname|getaddrinfo ENOTFOUND|getaddrinfo EAI_AGAIN/iu.test(message))) {
+      return {
+        code: 'service_entry_dns_error',
+        detail: '控制台无法通过 DNS 解析服务域名，请检查 Cloudflare 域名解析和控制台所在主机或 Docker 容器的 DNS 设置',
+        stage: 'service_entry'
+      };
+    }
+    current = cause;
+  }
+  return undefined;
+}
+
 function markFailure(service: ServiceHealth, failure: HealthFailure): void {
   service.healthy = false;
   service.detail = failure.detail;
@@ -71,7 +101,8 @@ export const httpServiceHealthChecker: ServiceHealthChecker = {
         let health: Awaited<ReturnType<typeof readHealthResponse>>;
         try {
           health = await readHealthResponse(workerResponse);
-        } catch {
+        } catch (error) {
+          if (networkFailure(error)) throw error;
           markFailure(service, {
             code: 'worker_health_invalid_response',
             detail: '服务入口没有返回有效的 Worker 健康信息',
@@ -93,18 +124,17 @@ export const httpServiceHealthChecker: ServiceHealthChecker = {
         service.stage = 'worker_configuration';
         service.httpStatus = workerResponse.status;
       } catch (error) {
-        const timedOut = error instanceof Error && error.name === 'TimeoutError';
-        markFailure(service, monitoringExisting
+        markFailure(service, networkFailure(error) ?? (monitoringExisting
           ? {
-              code: timedOut ? 'service_entry_timeout' : 'service_entry_unreachable',
-              detail: '无法连接 Worker 服务入口',
+              code: 'service_entry_unreachable',
+              detail: '控制台无法连接 Worker 服务入口，请查看运行日志并检查 DNS、网络和 TLS 证书',
               stage: 'service_entry'
             }
           : {
               code: 'domain_propagating',
-              detail: '证书或域名入口仍在生效',
+              detail: '暂时无法连接 Worker 服务入口，域名或证书可能尚未生效；若持续失败，请查看运行日志并检查 DNS 和网络',
               stage: 'service_entry'
-            });
+            }));
       }
     }));
   }

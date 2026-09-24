@@ -1,3 +1,4 @@
+import { DeploymentOverlay } from './DeploymentOverlay';
 import {
   AlertCircle,
   CheckCircle2,
@@ -638,6 +639,9 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
   const [password, setPassword] = useState('');
   const [validation, setValidation] = useState<ValidationResponse>(() => validateUglinkConfig(initialConfiguration.config));
   const [job, setJob] = useState<DeploymentJob>();
+  const [showDeploymentOverlay, setShowDeploymentOverlay] = useState(false);
+  const [deploymentError, setDeploymentError] = useState<string>();
+  const closeDeploymentOverlay = useCallback(() => setShowDeploymentOverlay(false), []);
   const [deploymentConfig, setDeploymentConfig] = useState<UglinkConfig>();
   const [deploymentServiceHostnames, setDeploymentServiceHostnames] = useState<ReadonlySet<string>>(
     () => new Set()
@@ -740,7 +744,12 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
     const timer = window.setTimeout(() => {
       void apiGet<DeploymentJob>(`/api/deployments/${job.id}`)
         .then((nextJob) => active && setJob(nextJob))
-        .catch((error) => active && setNotice({ type: 'error', message: errorMessage(error) }));
+        .catch((error) => {
+          if (!active) return;
+          const message = `无法确认部署结果：${errorMessage(error)}。请检查诊断或刷新页面确认状态。`;
+          setNotice({ type: 'error', message });
+          if (job.mode === 'overwrite') setDeploymentError(message);
+        });
     }, 2_500);
     return () => {
       active = false;
@@ -804,7 +813,10 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
   };
 
   const deployConfiguration = async (nextConfig: UglinkConfig, mode: DeploymentMode) => {
+    if (busy === 'deploy' || showDeploymentOverlay) return;
     if (mode === 'publish' && !hasChanges) return;
+    setDeploymentError(undefined);
+    if (mode === 'overwrite') setShowDeploymentOverlay(true);
     healthRequestVersion.current += 1;
     setCheckingHealth(false);
     setHealthCheckError(undefined);
@@ -821,6 +833,7 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
       const checked = await apiPost<ValidationResponse>('/api/validate', bootstrap.csrfToken, { config: nextConfig });
       setValidation(checked);
       if (!checked.valid) {
+        setDeploymentError('配置检查未通过，尚未发布任何修改。');
         setNotice({ type: 'error', message: '配置检查未通过，尚未发布任何修改。' });
         return;
       }
@@ -845,6 +858,7 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
         setNotice({ type: 'success', message: mode === 'overwrite' ? '覆盖部署已开始。' : '发布已开始。' });
       }
     } catch (error) {
+      setDeploymentError(`无法确认部署结果：${errorMessage(error)}。请检查诊断后再操作。`);
       setNotice({ type: 'error', message: errorMessage(error) });
     } finally {
       setBusy(undefined);
@@ -1050,6 +1064,8 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
           onDismiss={() => void dismissCloudConfiguration()}
         />
       )}
+
+      {showDeploymentOverlay && <DeploymentOverlay job={job} error={deploymentError} onClose={closeDeploymentOverlay} />}
 
       {notice && (
         <div

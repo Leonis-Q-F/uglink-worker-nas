@@ -6,6 +6,9 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "preview_urls": false,
+  "placement": {
+    "mode": "smart"
+  },
   "vars": {
     "UGLINK_CONTROL_MANAGED": "v1",
     "UGLINK_ID": "",

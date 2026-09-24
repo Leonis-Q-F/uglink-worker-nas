@@ -376,6 +376,7 @@ export async function uploadProxyWorker(
     compatibility_date: TARGET_COMPATIBILITY_DATE,
     compatibility_flags: ['nodejs_compat'],
     keep_bindings: ['secret_text', 'secret_key'],
+    placement: { mode: 'smart' },
     observability: { enabled: true, head_sampling_rate: 1 }
   };
   const form = new FormData();

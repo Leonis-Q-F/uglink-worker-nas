@@ -135,15 +135,13 @@ export function DiagnosticsPage({
         </div>
       )}
 
-      {isOverwriteJob && (
-        <div className={`diagnostics-deployment${overwriteFailed ? ' is-error' : overwriteComplete ? ' is-success' : ''}`}>
+      {isOverwriteJob && !overwriteComplete && (
+        <div className={`diagnostics-deployment${overwriteFailed ? ' is-error' : ''}`}>
           {overwriteFailed
             ? <AlertCircle size={19} />
-            : overwriteComplete
-              ? <CheckCircle2 size={19} />
-              : <LoaderCircle className="spin" size={19} />}
+            : <LoaderCircle className="spin" size={19} />}
           <div>
-            <strong>{overwriteFailed ? '覆盖部署失败' : overwriteComplete ? '覆盖部署完成' : '覆盖部署进行中'}</strong>
+            <strong>{overwriteFailed ? '覆盖部署失败' : '覆盖部署进行中'}</strong>
             <p>{job.message}</p>
           </div>
           <span>{formatDateTime(job.updatedAt)}</span>

@@ -219,9 +219,11 @@ describe('production Cloudflare deployment', () => {
     const metadataPart = (upload!.body as FormData).get('metadata');
     expect(metadataPart).toBeInstanceOf(Blob);
     const metadata = JSON.parse(await (metadataPart as Blob).text()) as {
+      placement: { mode: string };
       keep_bindings: string[];
       bindings: Array<{ name: string; type: string; namespace_id?: string }>;
     };
+    expect(metadata.placement).toEqual({ mode: 'smart' });
     expect(metadata.keep_bindings).toEqual(['secret_text', 'secret_key']);
     expect(metadata.bindings).toContainEqual({
       name: 'UGLINK_CACHE',
@@ -379,6 +381,10 @@ describe('production Cloudflare deployment', () => {
         return envelope([{ id: 'namespace-id-123456', title: 'uglink-test-uglink-cache' }]);
       }
       if (url.endsWith('/workers/scripts/uglink-test') && method === 'PUT') {
+        const metadataPart = (init?.body as FormData).get('metadata') as Blob;
+        const metadata = JSON.parse(await metadataPart.text());
+        expect(metadata.placement).toEqual({ mode: 'smart' });
+        expect(metadata.keep_bindings).toEqual(['secret_text', 'secret_key']);
         uploadCount += 1;
         return envelope({ deployment_id: `deployment-${uploadCount}` });
       }
