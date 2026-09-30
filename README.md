@@ -113,7 +113,7 @@ API Token 和 NAS 密码由用户在浏览器输入并提交，不持久化到�
 
 ## 更新与备份
 
-更新前查看 [Release 说明](https://github.com/Leonis-Q-F/uglink-worker-nas/releases)，然后执行：
+更新前查看 [Release 说明](https://github.com/Leonis-Q-F/uglink-worker-nas/releases)，并按 [数据持久化与备份](docs/deployment.md#数据持久化与备份) 备份整个数据卷，再执行：
 
 ```bash
 docker compose pull

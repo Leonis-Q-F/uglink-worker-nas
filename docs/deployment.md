@@ -153,7 +153,7 @@ environment:
 
 在绿联云 NAS 的 **Docker → 容器** 页面中更新，无需命令行：
 
-1. 更新前查看 [Release 说明](https://github.com/Leonis-Q-F/uglink-worker-nas/releases)，并备份控制台配置。
+1. 更新前查看 [Release 说明](https://github.com/Leonis-Q-F/uglink-worker-nas/releases)，并按 [数据持久化与备份](#数据持久化与备份) 备份整个数据卷；也建议另外导出一份加密配置备份。
 2. 找到 `uglink-console-1`。检测到新镜像时，容器名称旁会显示「可更新」标记，如下图所示。
 3. 点击该容器的「可更新」入口，按界面提示完成更新，保留原有的 `uglink-data` 数据卷。
 4. 等待容器恢复「运行中」，重新打开控制台，确认原有配置正常。
@@ -165,6 +165,87 @@ environment:
 前面的 YAML 使用 `latest` 镜像标签。需要固定版本时，在项目的 Compose 配置中，将 `image` 末尾的 `latest` 改为所需的已发布版本标签。更新过程中不要删除数据卷，控制台配置和会话加密密钥都保存在其中。
 
 更新控制台不会自动更新已经部署的 Gateway。涉及网关变更时，请按照 [Release 说明](https://github.com/Leonis-Q-F/uglink-worker-nas/releases)，在更新后的控制台进入「故障诊断 → 覆盖部署」。该操作使用已发布配置更新项目管理的同名 Worker，保留现有 NAS 密码，无需修改服务配置来启用发布按钮。
+
+## 数据持久化与备份
+
+### 备份范围与注意事项
+
+- Docker 的 `uglink-data` 卷挂载到容器的 `/data`，不在 NAS 项目的存放路径下。卷内的 `console.sqlite` 保存控制台数据，包括加密会话、服务配置、草稿与诊断记录；自动生成的会话密钥保存在隐藏文件 `.dev.vars` 中。SQLite 的 `console.sqlite-wal`、`console.sqlite-shm`（若存在）以及旧版 `wrangler` 目录也要一起备份，不能只复制数据库主文件。
+- **完整卷备份前先停止所有使用该卷的控制台，确认没有写入，再备份整个卷，包括隐藏文件。** 更新或重建容器时保留数据卷，不要执行 `docker compose down --volumes`，也不要在 NAS 界面删除数据卷。
+- 如果通过环境变量自行提供 `SESSION_ENCRYPTION_KEY`，它不一定在卷内；需另外安全保存原密钥，并在恢复时注入同一密钥。项目的 Compose YAML、`.env`（若使用）和原镜像版本也应另外保存；不要把这些敏感文件提交到仓库。
+- 卷归档只是压缩文件，**没有加密**，而且可能同时包含加密 API Token 和解密密钥。应限制访问权限，保存在受保护、最好加密的存储中，并另留一份异机副本。应用导出的加密备份及其密码也需妥善保管，不要上传到 Issue 或公开分享。
+- 已发布的非秘密配置会同步到目标 Worker 的 `UGLINK_CACHE` KV，但 API Token、NAS 密码和本地草稿不会同步；「导入云端配置」不能代替完整备份。NAS 密码保存在 Gateway 的 Worker Secret 中，无法回读，因此卷备份和加密配置备份都不包含它。重建 Gateway 时需重新提供 NAS 密码。
+
+### 在控制台导出和恢复加密配置备份
+
+此方式可在网页中完成，适合转移当前 Cloudflare 连接和配置，但不是整个数据卷的快照。
+
+1. 在已连接的控制台找到「加密备份与恢复」，点击「导出备份」。设置并确认独立的 **12–256 个字符**备份密码，保存下载的 JSON 文件。导出包含当前连接的 API Token、目标 Worker、UGREENlink ID、NAS 登录用户名、已发布配置、本地草稿及最多 100 条诊断记录，不包含 NAS 密码。
+2. 恢复前先备份现有配置。在初始连接页面或「加密备份与恢复」中点击「恢复备份」，选择 JSON 文件，输入原备份密码，再点击「验证并恢复」。恢复时会连接 Cloudflare 验证备份里的 API Token，需能访问 Cloudflare 且 Token 仍有效。
+3. 恢复会替换备份目标在当前控制台中的已发布配置、草稿和对应诊断记录，并恢复连接；不会自动重新部署线上 Gateway。先核对账户、Worker 和服务，再按需发布。
+
+### 完整数据卷备份（需要 SSH 或终端）
+
+NAS 图形界面部署和更新步骤保持不变。下面是可选的 Docker 命令行备份方式，需要能在 NAS 上运行 Docker 命令；若使用 NAS 备份工具，也必须确认它覆盖实际数据卷、隐藏文件和文件权限，并在控制台停止期间完成备份，而不是只复制项目文件夹。
+
+示例使用上文默认的容器名 `uglink-console-1` 和卷名 `uglink-data`。先用 `docker inspect uglink-console-1` 确认挂载到 `/data` 的卷名称；自定义名称时请相应替换，确保该卷没有其他运行中的写入者。备份目录应位于有足够空间的持久存储上。
+
+```bash
+(
+  set -eu
+  umask 077
+  mkdir -p backup
+  archive="$PWD/backup/uglink-data-$(date +%Y%m%d-%H%M%S).tgz"
+  docker volume inspect uglink-data >/dev/null
+  docker pull alpine:3.22
+  docker stop --time 20 uglink-console-1
+  test "$(docker inspect -f '{{.State.Running}}' uglink-console-1)" = false
+  docker run --rm --network none --mount type=volume,src=uglink-data,dst=/data,readonly \
+    alpine:3.22 tar czf - -C /data . > "$archive"
+  tar tzf "$archive" >/dev/null
+  sha256sum "$archive" > "$archive.sha256"
+  docker start uglink-console-1
+  printf '备份文件：%s\n' "$archive"
+)
+```
+
+命令失败会中止后续步骤；如果容器已停止，排查后执行 `docker start uglink-console-1` 恢复控制台，不要把不完整归档当作有效备份。归档列表检查和校验和不能替代恢复演练。停止本地控制台不会停止已发布的云端 Gateway。
+
+### 从完整卷备份恢复
+
+1. 保存当前 Compose 配置和镜像版本，并先为当前卷再做一份备份。停止原控制台，确认没有其他容器写入恢复目标。选择可信的、已验证的备份；回退版本时优先使用备份时的镜像版本。
+2. **恢复到一个新的空卷，保留原卷，避免覆盖现有数据。** 将下例归档路径换成实际文件；校验和文件使用上面备份命令生成的路径，移动备份后需相应调整校验文件里的路径。新卷名也要确保未被其他项目使用。
+
+```bash
+(
+  set -eu
+  archive="$PWD/backup/uglink-data-YYYYMMDD-HHMMSS.tgz"
+  restored_volume="uglink-data-restored-$(date +%Y%m%d-%H%M%S)"
+  sha256sum -c "$archive.sha256"
+  tar tzf "$archive" >/dev/null
+  docker pull alpine:3.22
+  if docker volume inspect "$restored_volume" >/dev/null 2>&1; then
+    printf '目标卷已存在，请更换卷名后重试。\n' >&2
+    exit 1
+  fi
+  docker volume create "$restored_volume"
+  docker run --rm -i --network none \
+    --mount "type=volume,src=$restored_volume,dst=/data" alpine:3.22 \
+    sh -ec 'test -z "$(ls -A /data)"; tar xzpf - -C /data' < "$archive"
+  printf '恢复卷名：%s\n' "$restored_volume"
+)
+```
+
+3. 只在解包成功后，在 NAS 项目的 Compose YAML（或本地 `compose.yaml`）中把底部 `volumes.uglink-data.name` 的值从 `uglink-data` 改为上一步输出的恢复卷名，并在该卷定义下添加 `external: true`（与 `name` 同级），明确使用已恢复的外部卷，保留服务中的 `uglink-data:/data` 映射。若原来注入了会话密钥，恢复原值。通过 NAS 项目重新部署容器；命令行部署则在原 Compose 项目目录执行 `docker compose up -d --no-build`。仅启动旧容器不会切换挂载。
+4. 确认新容器的 `/data` 挂载指向恢复卷，检查日志、控制台配置、草稿与服务访问。卷内文件需保留归档中的权限和所有者，当前镜像使用 UID/GID `1000:1000`；遇到权限或密钥错误先排查，不要通过删除卷或重新生成密钥来“修复”。浏览器 Cookie 或服务端会话过期后仍可能需要重新连接 Cloudflare。
+
+验证完成前保留原卷和备份。恢复本地卷不会回滚 Cloudflare 上的 Worker、Secret 或域名设置，若需回滚线上网关，应另按对应版本的 Release 说明处理。
+
+### 从旧版 Wrangler 容器迁移与回退
+
+首次启动新版时会从 `/data/wrangler/v3/kv` 事务性导入未过期的旧记录，保留原密钥和旧文件；完成后不会重复导入。旧数据布局不支持或迁移所需文件缺失时会启动失败，不会静默清空配置。升级前先停止旧容器并备份整个卷，不要让新旧版本同时写同一个卷。
+
+旧镜像只读取旧 KV 文件，看不到升级后写入 SQLite 的更改。需要回退时，应使用升级前的完整卷备份和对应旧镜像；若要保留升级后的最新配置，可先导出加密配置备份，再确认目标版本支持后恢复。
 
 ## 将管理控制台部署到 Cloudflare
 
