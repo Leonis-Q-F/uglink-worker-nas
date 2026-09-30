@@ -23,46 +23,112 @@
 > [!WARNING]
 > **不要使用 Global API Key。** 只需要授予以下最小权限，并把范围限制到目标账户：
 >
-> | 权限 | 级别 |
-> |------|------|
-> | Account / Workers Scripts | Edit |
+> | 权限                         | 级别 |
+> | ---------------------------- | ---- |
+> | Account / Workers Scripts    | Edit |
 > | Account / Workers KV Storage | Edit |
+>
 
+## 在绿联云 NAS 的 Docker 应用中部署
 
-## Docker 管理控制台
+在绿联云 NAS 的应用中心安装并打开 **Docker** 应用。以下步骤都在图形界面中完成，无需 SSH 或命令行。
 
-安装 Docker 和 Docker Compose，在空目录下载项目提供的配置：
+### 1. 创建项目并填写 YAML
 
-```bash
-mkdir uglink
-cd uglink
-curl -fL https://raw.githubusercontent.com/Leonis-Q-F/uglink-worker-nas/main/compose.yaml -o compose.yaml
-curl -fL https://raw.githubusercontent.com/Leonis-Q-F/uglink-worker-nas/main/.env.example -o .env
-# 仅运行发布镜像，不从源码构建
-docker compose up -d --no-build
+进入 Docker 的「项目」页面，创建项目：
+
+- **项目名称**：填写 `uglink`。
+- **存放路径**：选择用于保存项目文件的文件夹，例如 `共享文件夹/docker/uglink`。
+- **Compose 配置**：将下面的 YAML 完整粘贴到编辑框中。
+
+```yaml
+name: uglink
+
+services:
+  console:
+    image: ghcr.io/leonis-q-f/uglink-worker-nas:latest
+    init: true
+    restart: unless-stopped
+    ports:
+      - "5173:8787"
+    volumes:
+      - uglink-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 20s
+
+volumes:
+  uglink-data:
+    name: uglink-data
 ```
 
-配置中的 `build` 用于源码开发。只有配置文件的安装方式请使用 `--no-build`。
+如果 NAS 的 `5173` 端口已被占用，将 `"5173:8787"` 改为例如 `"5180:8787"`，右侧容器端口 `8787` 保持不变。此配置直接使用发布镜像，不需要下载源码或额外创建 `.env` 文件。
 
-打开 `http://设备地址:5173`，连接 Cloudflare，填写 UGREENlink ID、NAS 本地登录用户名及密码，然后添加服务域名和端口并发布。NAS 用户名与 UGREENlink ID 是两个不同字段。
+勾选「创建完成后立即运行」，点击「立即部署」。
 
-控制台默认监听所有网络接口，仅供可信局域网使用。需要远程访问时，应配置具有身份验证和 HTTPS 的反向代理或 Cloudflare Access。具体见 [安全策略](../SECURITY.md)。
+<p align="center">
+  <img src="../assets/ugreen-docker-create-project.png" alt="在绿联 Docker 中填写项目名称、存放路径和 Compose YAML，然后立即部署" width="1000" />
+</p>
 
-镜像支持 `linux/amd64` 和 `linux/arm64`。数据保存在 `uglink-data` 卷内；重建容器不会删除该卷。
+### 2. 等待部署并确认容器运行
 
-Docker 控制台由一个 Node.js 进程提供 API 和静态页面，使用内置 SQLite 保存本地数据。Wrangler 只用于源码开发和构建，不随运行镜像启动。云端控制台和 Gateway 仍使用 Workers 与 KV。
+等待镜像下载和项目创建完成。部署日志会显示网络、数据卷和容器的创建结果，点击「完成」返回。
 
-如果使用 HTTPS 反向代理，请在 Compose 的 `services.console.environment` 中设置 `UGLINK_PUBLIC_ORIGIN: "https://console.example.com"`，替换为实际控制台来源，不含路径或末尾斜杠。代理需保留 Host；控制台不会信任客户端传入的 `X-Forwarded-*` 来判断来源。此设置用于同源检查和 Secure Cookie，不能替代代理的访问认证。
+<p align="center">
+  <img src="../assets/ugreen-docker-deployment-log.png" alt="部署日志显示 uglink 网络、数据卷和控制台容器已创建" width="720" />
+</p>
+
+进入「容器」页面，找到 `uglink-console-1`，确认状态为「运行中」。通过容器右侧的访问入口选择 `5173:8787`，或在浏览器中打开 `http://你的NAS局域网IP:5173`。如果前面修改了主机端口，这里也使用修改后的端口。
+
+<p align="center">
+  <img src="../assets/ugreen-docker-container-access.png" alt="在容器页面确认 uglink-console-1 运行中，并通过 5173 端口访问控制台" width="1000" />
+</p>
+
+日志中的 `Created` 只表示资源已创建。如果容器反复重启或网页无法打开，请查看容器日志，确认是否出现启动错误。
+
+### 3. 连接 Cloudflare 并按需导入配置
+
+打开控制台后，填写前面准备好的 **Cloudflare Account ID** 和 **API Token**，选择目标 Worker 名称并连接。
+
+如果该 Worker 已保存本项目的已发布配置，控制台会提示「检测到已有配置」。需要恢复时点击「导入配置」；首次使用时没有该提示，直接继续配置即可。
+
+<p align="center">
+  <img src="../assets/console-import-cloud-configuration.png" alt="控制台检测到云端已有配置，提示是否导入已发布的服务" width="1000" />
+</p>
+
+导入会替换当前控制台的已发布配置和本地草稿。API Token 和 NAS 密码不会从云端配置读取。
+
+### 4. 填写 NAS 信息并发布服务
+
+在「服务配置」页面完成以下设置：
+
+1. 填写 **UGREENlink ID**，即 `https://ug.link/` 后的设备 ID，并确保 NAS 已启用 UGREENlink 远程访问。
+2. 填写 **NAS 本地登录用户名和密码**。首次发布必须填写密码，后续发布留空则保留已部署的密码。
+3. 点击「添加服务」，填写服务名称、完整域名和 NAS 端口，并启用服务。每项服务使用独立子域名，所属域名需已托管到当前 Cloudflare 账户。
+4. 点击「检查配置」，确认后点击「发布更改」，等待发布完成，再通过服务域名访问对应应用。
+
+<p align="center">
+  <img src="../assets/console-service-configuration.png" alt="在服务配置页面填写 NAS 连接信息、服务域名和端口，检查配置并发布" width="1000" />
+</p>
+
+控制台配置和自动生成的会话加密密钥保存在 Docker 的 `uglink-data` 数据卷中，并非项目存放路径下的普通文件。重建或更新容器时保留该卷；已有同名卷会被复用。配置检查通过不代表 NAS 后端应用一定可达，发布后仍需实际访问验证。
 
 ### Compose 配置
 
+上面的图形界面教程已将镜像和端口直接写入 YAML，需要调整时编辑对应字段即可。以下变量适用于使用仓库原始 [compose.yaml](../compose.yaml) 的部署方式。
+
 下列变量写入 Compose 项目目录的 `.env`。完整示例见 [`.env.example`](../.env.example)。
 
-| 变量 | 说明 | 默认值 |
-| --- | --- | --- |
-| `UGLINK_BIND_ADDRESS` | 主机监听地址；仅本机使用时填 `127.0.0.1` | `0.0.0.0` |
-| `UGLINK_CONSOLE_PORT` | 主机端口 | `5173` |
-| `UGLINK_IMAGE` | 镜像地址及版本 | `ghcr.io/leonis-q-f/uglink-worker-nas:latest` |
+| 变量                    | 说明                                      | 默认值                                          |
+| ----------------------- | ----------------------------------------- | ----------------------------------------------- |
+| `UGLINK_BIND_ADDRESS` | 主机监听地址；仅本机使用时填`127.0.0.1` | `0.0.0.0`                                     |
+| `UGLINK_CONSOLE_PORT` | 主机端口                                  | `5173`                                        |
+| `UGLINK_IMAGE`        | 镜像地址及版本                            | `ghcr.io/leonis-q-f/uglink-worker-nas:latest` |
 
 ### 会话加密密钥
 
@@ -85,48 +151,20 @@ environment:
 
 ### 更新
 
-```bash
-docker compose pull
-docker compose up -d --no-build
-```
+在绿联云 NAS 的 **Docker → 容器** 页面中更新，无需命令行：
 
-`latest` 随主分支发布。需要固定版本时，在 `.env` 中设置 `UGLINK_IMAGE=ghcr.io/leonis-q-f/uglink-worker-nas:1.0.3` 等已发布标签。
+1. 更新前查看 [Release 说明](https://github.com/Leonis-Q-F/uglink-worker-nas/releases)，并备份控制台配置。
+2. 找到 `uglink-console-1`。检测到新镜像时，容器名称旁会显示「可更新」标记，如下图所示。
+3. 点击该容器的「可更新」入口，按界面提示完成更新，保留原有的 `uglink-data` 数据卷。
+4. 等待容器恢复「运行中」，重新打开控制台，确认原有配置正常。
+
+<p align="center">
+  <img src="../assets/ugreen-docker-container-update.png" alt="绿联 Docker 容器卡片显示可更新标记，可从此入口更新控制台" width="840" />
+</p>
+
+前面的 YAML 使用 `latest` 镜像标签。需要固定版本时，在项目的 Compose 配置中，将 `image` 末尾的 `latest` 改为所需的已发布版本标签。更新过程中不要删除数据卷，控制台配置和会话加密密钥都保存在其中。
 
 更新控制台不会自动更新已经部署的 Gateway。涉及网关变更时，请按照 [Release 说明](https://github.com/Leonis-Q-F/uglink-worker-nas/releases)，在更新后的控制台进入「故障诊断 → 覆盖部署」。该操作使用已发布配置更新项目管理的同名 Worker，保留现有 NAS 密码，无需修改服务配置来启用发布按钮。
-
-### 为已部署的网关启用 Smart Placement
-
-新版本通过控制台发布或 Wrangler 部署 Gateway 时，会默认开启 Smart Placement，由 Cloudflare 根据请求耗时选择执行位置。
-
-- Docker 用户：更新到包含此功能的镜像后，执行一次「故障诊断 → 覆盖部署」。只更新或重启控制台容器不会改变线上 Worker 的设置。
-- 源码部署用户：更新源码后，通过新版控制台覆盖部署，或执行 `npm run deploy:gateway`。使用 Wrangler 前，请确认部署配置仍指向原来的 Worker、KV 和域名。
-- 暂时不升级的用户：可以在 Cloudflare 的「Workers & Pages → 目标 Worker → Settings → General → Placement」中选择 Smart。旧版控制台不保证后续发布时保留该设置，建议升级后由项目统一管理。
-
-开启后可能需要最多 15 分钟分析，并且需要来自多个位置的持续请求。启用配置不代表已经迁移执行位置，也不保证所有访问都变快。机制与适用条件见 [Cloudflare Placement 文档](https://developers.cloudflare.com/workers/configuration/placement/)。
-
-## 数据持久化与备份
-
-- `uglink-data` 卷保存自动生成的会话加密密钥和 `console.sqlite`，包含加密 API Token、服务配置与诊断记录。SQLite 的 WAL 文件也属于运行数据，备份时应停止控制台并备份整个卷。
-- 从旧版 Wrangler 容器升级时，首次启动会自动读取 `/data/wrangler/v3/kv`，在事务中导入未过期记录并保留原密钥和旧文件。迁移完成后不会重复导入；缺失文件或不支持的数据格式会导致启动失败，不会静默重置配置。请先停止旧容器，不要让新旧版本同时写同一数据卷。
-- 升级前应备份整个数据卷。若回退旧镜像，它只会读取旧 KV 文件，看不到升级后写入 SQLite 的更改；应配合升级前的卷备份回退，或使用应用内加密备份转移最新配置。
-- 已发布的非秘密配置同步到目标 Worker 的 `UGLINK_CACHE` KV；API Token、NAS 密码和本地草稿不会同步。
-- 更新时使用 `docker compose pull && docker compose up -d`；不要执行 `docker compose down --volumes` 或手动删除 `uglink-data`。
-- 加密备份包含 Cloudflare 连接、UGREENlink ID、NAS 登录用户名、服务配置和诊断记录，需要至少 12 个字符的独立备份密码。
-- NAS 登录密码由 Cloudflare Worker Secret 保存，Cloudflare 不允许读取 Secret 明文，因此不会进入备份文件。
-- 完整灾难恢复应停止控制台后成组备份整个卷；卷备份和应用导出的加密备份都应按敏感数据保管。
-
-完整卷备份示例：
-
-```bash
-mkdir -p backup
-docker compose stop console
-docker run --rm -v uglink-data:/data:ro -v "$PWD/backup:/backup" alpine \
-  tar czf /backup/uglink-data.tgz -C /data .
-docker compose start console
-```
-
-如需直接管理宿主机文件，可以把卷改为 `/volume1/docker/uglink:/data` 等绝对路径；该高级方案需要提前为容器内 UID/GID `1000:1000` 配置写入权限。
-
 
 ## 将管理控制台部署到 Cloudflare
 
@@ -157,18 +195,5 @@ npm run deploy:console
 部署成功后通过 Wrangler 输出的地址打开控制台，并在控制台连接目标 Cloudflare 账户。Wrangler 的登录用于部署控制台，不替代控制台内的 API Token 连接。
 
 云端控制台应配置访问控制。`.dev.vars` 只用于本地开发，不会替代生产环境的 Worker Secret。
-
-## 直接部署 Gateway
-
-高级使用者可以通过 Wrangler 部署 Gateway，不必使用管理控制台。此路径与控制台的配置存储相互独立。
-
-1. 安装依赖并执行 `npx wrangler login`。
-2. 修改 `uglink.config.json`，填写设备、用户名和服务映射，见 [配置说明](configuration.md)。
-3. 执行 `npx wrangler kv namespace create UGLINK_CACHE --config wrangler.gateway.jsonc`，将返回的命名空间 ID 填入 `wrangler.gateway.jsonc` 对应的 KV 绑定，并确认目标 Worker 名称。
-4. 执行 `npm run config:generate`。
-5. 执行 `npx wrangler secret put PASSWORD --config wrangler.gateway.generated.json`，按提示输入 NAS 密码；Worker 尚不存在时确认创建。
-6. 执行 `npm run deploy:gateway`。
-
-生成的 `wrangler.gateway.generated.json` 包含服务映射和自定义域名路由，不应手动修改或提交。此路径不会自动写入控制台用于恢复的云端配置记录。
 
 返回 [项目首页](../README.md)。
