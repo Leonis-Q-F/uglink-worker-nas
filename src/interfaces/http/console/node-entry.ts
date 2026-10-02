@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import { SqliteConsoleStore } from '../../../infrastructure/persistence/sqlite-console-store';
 import { createConsoleServer } from './node-server';
+import { parseServerConfig } from './server-config';
 
 async function sessionKey(directory: string): Promise<string> {
   const injected = process.env.SESSION_ENCRYPTION_KEY;
@@ -34,6 +35,8 @@ async function sessionKey(directory: string): Promise<string> {
 
 async function main(): Promise<void> {
   process.umask(0o077);
+  const ingress = parseServerConfig(process.env);
+  if (ingress.publicOrigin) console.warn('[启动] UGLINK_PUBLIC_ORIGIN 已弃用；多入口请配置 UGLINK_ALLOWED_ORIGINS 和代理策略。');
   const port = Number(process.env.PORT || 8787);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT 必须是 1–65535 之间的整数。');
   const directory = resolve(process.env.UGLINK_DATA_DIR || '/data');
@@ -48,7 +51,7 @@ async function main(): Promise<void> {
       CONSOLE_SESSIONS: store,
       SESSION_ENCRYPTION_KEY: key,
       CONSOLE_TITLE: process.env.CONSOLE_TITLE || 'UGLINK Control'
-    }, fileURLToPath(new URL('../client', import.meta.url)), process.env.UGLINK_PUBLIC_ORIGIN);
+    }, fileURLToPath(new URL('../client', import.meta.url)), ingress);
     const cleanup = setInterval(() => {
       try { store.pruneExpired(); } catch { console.error('[存储] 清理过期记录失败。'); }
     }, 60 * 60 * 1000);

@@ -278,3 +278,57 @@ npm run deploy:console
 云端控制台应配置访问控制。`.dev.vars` 只用于本地开发，不会替代生产环境的 Worker Secret。
 
 返回 [项目首页](../README.md)。
+
+## 多入口与反向代理来源配置
+
+Docker 控制台支持局域网 HTTP、标准 HTTPS 反向代理，以及保留外部 Host 的 HTTPS 入口同时使用。出现“请求来源无效”时，应配置浏览器实际访问的来源；不要关闭同源或 CSRF 检查。控制台入口需由 HTTPS 和访问认证保护，来源列表不是登录认证。
+
+### 仅局域网直连
+
+默认无需增加配置，代理头不会影响来源。若要限制可访问地址，在 Docker 项目的 `services.console.environment` 中填写完整来源，例如 `UGLINK_ALLOWED_ORIGINS: 'http://nas.example.test:5173'`。实际使用时将示例替换为 NAS 的局域网 IP 或域名及端口。
+
+### 保留外部 Host 的入口（包括符合此条件的绿联远程入口）
+
+在 Docker 图形界面编辑项目 YAML，把以下内容加在 `console` 服务下，与 `ports`、`volumes` 同级。替换成自己浏览器地址栏的精确域名和端口，然后重新部署项目，保留原数据卷。
+
+```yaml
+environment:
+  UGLINK_ALLOWED_ORIGINS: 'http://nas.example.test:5173,https://relay.example.net,https://console.example.com'
+  UGLINK_PROXY_HEADER_MODE: 'off'
+  UGLINK_HOST_ORIGIN_MAP: '{"relay.example.net":"https://relay.example.net","console.example.com":"https://console.example.com"}'
+```
+
+映射只为同一个 Host 明确协议，不允许把内部主机名换成另一外部域名；首次不带 Origin 的 bootstrap GET 也会得到正确的 Secure Cookie。非默认端口必须同时写在来源及映射 key 内。
+
+### 能清洗转发头的标准代理
+
+```yaml
+environment:
+  UGLINK_ALLOWED_ORIGINS: 'http://nas.example.test:5173,https://console.example.com'
+  UGLINK_TRUSTED_PROXY_CIDRS: '192.0.2.10/32'
+  UGLINK_PROXY_HEADER_MODE: 'x-forwarded-single'
+```
+
+`192.0.2.10` 是文档保留地址，必须替换为应用实际看到的代理 socket 对端。代理应在独立受控网络上连接应用，清除客户端的 `Forwarded` 和所有 `X-Forwarded-*`，再设置单值 `X-Forwarded-Host: console.example.com` 与 `X-Forwarded-Proto: https`。外部端口放在 Host 中，应用不采用 `X-Forwarded-Port`。
+
+也可选择 `forwarded-single`，由代理输出一组 `Forwarded: host=console.example.com;proto=https`；带端口或 IPv6 的 host 应使用 RFC 引号语法，例如 `host="[2001:db8::1]:8443"`。两个头族不混用，不接受逗号列表、重复头或重复参数。可信代理缺少完整元数据时仅能退回命中的精确 Host 映射，否则拒绝请求。
+
+**不要直接信任 Docker 网关、所有私网或回环地址。** 若直连请求经 NAT 后也显示为该对端，客户端可以伪造代理头。应隔离代理网络、限制入口可达性，或使用精确 Host 映射。应用默认不会自动信任任何这些地址。
+
+### 参数与兼容性
+
+| 参数 | 默认 | 用途 |
+| --- | --- | --- |
+| `UGLINK_ALLOWED_ORIGINS` | 空 | 逗号分隔的精确 `http(s)://host[:port]`，不带路径、末尾斜杠、通配符、查询或片段 |
+| `UGLINK_TRUSTED_PROXY_CIDRS` | 空 | 精确 IP/CIDR，支持 IPv4、IPv6、IPv4-mapped IPv6；只检查 socket 对端 |
+| `UGLINK_PROXY_HEADER_MODE` | `off` | `off`、`x-forwarded-single`、`forwarded-single` |
+| `UGLINK_HOST_ORIGIN_MAP` | `{}` | JSON 对象，精确 Host 到同 authority 的完整来源映射，值必须在允许列表内 |
+| `UGLINK_PUBLIC_ORIGIN` | 空 | 弃用的单一固定来源兼容项，不能与非空多入口配置混用 |
+
+无效配置启动失败；未允许的目标返回 `421 unconfigured_origin`，代理头不完整或冲突返回 `400 invalid_proxy_headers`，可信代理完全缺少元数据返回 `400 proxy_context_missing`，浏览器来源与本次目标不同返回 `403 invalid_origin`。即使两个地址都在允许列表中，也不允许互相跨来源写入。缺少 Origin 的兼容请求仍须有效会话及 CSRF Token。精确 `GET /api/health` 不创建会话，可独立用于容器健康检查。
+
+本仓库 Compose 已显式注入这些参数；自行粘贴 GUI YAML 时要加上 `environment`。只修改用于 Compose 插值的 `.env` 并不代表参数进入了容器。
+
+不同域名和 LAN IP 使用各自 host-only Cookie，可能需要分别连接 Cloudflare；不提供跨域登录同步。同主机名不同端口/协议的 Cookie 不隔离，不属于独立会话支持范围。bootstrap 会刷新已有 Cookie 属性但不延长服务端会话期限。回滚后浏览器可能仍保存 Secure Cookie，必要时仅清除对应站点 Cookie，保留服务端数据卷与加密密钥。
+
+本地 Docker/TLS 代理可以验证上述协议，但不能证明真实绿联链路传递了哪些信息。如果远程入口既改写 Host 又丢失外部协议/主机信息，需要可控中间代理或调整入口拓扑；目前未加入条件性的第二固定来源监听端口。真实绿联设备链路仍需用户按实际入口验收，不能依赖厂商品牌域名自动放行。

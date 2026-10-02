@@ -6,7 +6,9 @@ import { pipeline } from 'node:stream/promises';
 import { ApplicationError } from '../../../application/common/application-error';
 import { apiError } from '../http';
 import type { ConsoleWorkerEnv } from './environment';
-import worker from './worker';
+import { handleConsoleRequest } from './worker';
+import { resolveNodeContext } from './node-request-context';
+import { parseServerConfig, type ServerConfig } from './server-config';
 
 const MAX_BODY_BYTES = 1_048_576;
 const CONTENT_TYPES: Record<string, string> = {
@@ -47,14 +49,6 @@ async function send(response: Response, outgoing: ServerResponse, head = false):
   await pipeline(response.body, outgoing);
 }
 
-function requestUrl(request: IncomingMessage, publicOrigin?: string): URL {
-  const host = request.headers.host;
-  if (!host || /[\s/@?#\\]/u.test(host) || !request.url?.startsWith('/') || request.url.startsWith('//')) {
-    throw new ApplicationError(400, 'invalid_request', '请求地址无效。');
-  }
-  return new URL(request.url, publicOrigin || `http://${host}`);
-}
-
 async function staticFile(request: IncomingMessage, response: ServerResponse, root: string, url: URL): Promise<void> {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     response.setHeader('Allow', 'GET, HEAD');
@@ -91,15 +85,15 @@ async function staticFile(request: IncomingMessage, response: ServerResponse, ro
   await pipeline(createReadStream(file), response);
 }
 
-export function createConsoleServer(env: ConsoleWorkerEnv, assetDirectory: string, publicOrigin?: string) {
+export function createConsoleServer(env: ConsoleWorkerEnv, assetDirectory: string, options?: string | ServerConfig) {
   const root = realpathSync(assetDirectory);
-  if (publicOrigin && (!/^https?:\/\//u.test(publicOrigin) || new URL(publicOrigin).origin !== publicOrigin)) {
-    throw new Error('UGLINK_PUBLIC_ORIGIN 必须是完整的 http/https 来源，不含路径或末尾斜杠。');
-  }
+  const config = typeof options === 'string' ? parseServerConfig({ UGLINK_PUBLIC_ORIGIN: options }) : options ?? parseServerConfig();
   const server = createServer({ requestTimeout: 30_000, headersTimeout: 15_000 }, (incoming, outgoing) => {
     void (async () => {
       try {
-        const url = requestUrl(incoming, publicOrigin);
+        const context = resolveNodeContext({ rawHeaders: incoming.rawHeaders, remoteAddress: incoming.socket.remoteAddress,
+          target: incoming.url, method: incoming.method }, config);
+        const url = new URL(context.externalUrl);
         if (url.pathname !== '/api' && !url.pathname.startsWith('/api/')) {
           await staticFile(incoming, outgoing, root, url);
           return;
@@ -110,7 +104,7 @@ export function createConsoleServer(env: ConsoleWorkerEnv, assetDirectory: strin
         }
         const body = await readBody(incoming);
         const request = new Request(url, { method: incoming.method, headers, body });
-        await send(await worker.fetch(request, env), outgoing, incoming.method === 'HEAD');
+        await send(await handleConsoleRequest(request, env, context), outgoing, incoming.method === 'HEAD');
       } catch (error) {
         if (outgoing.destroyed) return;
         if (outgoing.headersSent) { outgoing.destroy(); return; }

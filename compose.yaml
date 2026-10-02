@@ -8,6 +8,12 @@ services:
       dockerfile: Dockerfile
     init: true
     restart: unless-stopped
+    environment:
+      UGLINK_PUBLIC_ORIGIN: ${UGLINK_PUBLIC_ORIGIN:-}
+      UGLINK_ALLOWED_ORIGINS: ${UGLINK_ALLOWED_ORIGINS:-}
+      UGLINK_TRUSTED_PROXY_CIDRS: ${UGLINK_TRUSTED_PROXY_CIDRS:-}
+      UGLINK_PROXY_HEADER_MODE: ${UGLINK_PROXY_HEADER_MODE:-off}
+      UGLINK_HOST_ORIGIN_MAP: ${UGLINK_HOST_ORIGIN_MAP:-{}}
     ports:
       - "${UGLINK_BIND_ADDRESS:-0.0.0.0}:${UGLINK_CONSOLE_PORT:-5173}:8787"
     volumes:

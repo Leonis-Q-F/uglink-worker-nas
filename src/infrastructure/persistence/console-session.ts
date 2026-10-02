@@ -92,13 +92,14 @@ export async function saveSession(env: ConsoleSessionEnvironment, handle: Sessio
   });
 }
 
-export function applySessionCookie(request: Request, response: Response, handle: SessionHandle): Response {
-  if (!handle.shouldSetCookie) return response;
+export function applySessionCookie(request: Request, response: Response, handle: SessionHandle, options: { secure: boolean; refresh?: boolean } = { secure: new URL(request.url).protocol === 'https:' }): Response {
+  if (!handle.shouldSetCookie && !options.refresh) return response;
   const headers = new Headers(response.headers);
-  const secure = new URL(request.url).protocol === 'https:' ? '; Secure' : '';
+  const secure = options.secure ? '; Secure' : '';
+  const maxAge = Math.max(0, Math.floor((handle.data.expiresAt - Date.now()) / 1000));
   headers.append(
     'Set-Cookie',
-    `${COOKIE_NAME}=${handle.id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`
+    `${COOKIE_NAME}=${handle.id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`
   );
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }

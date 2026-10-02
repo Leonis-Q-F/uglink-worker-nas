@@ -1,3 +1,4 @@
+import { normalizeOrigin } from './console/request-context';
 import { ApplicationError } from '../../application/common/application-error';
 import type { ApiErrorPayload } from './contracts';
 
@@ -63,10 +64,11 @@ export async function readJson<T>(request: Request, maxBytes = 65_536): Promise<
   }
 }
 
-export function assertSameOrigin(request: Request): void {
+export function assertSameOrigin(request: Request, expectedOrigin = new URL(request.url).origin): void {
   const origin = request.headers.get('origin');
-  if (!origin) return;
-  if (origin !== new URL(request.url).origin) {
-    throw new ApplicationError(403, 'invalid_origin', '请求来源无效。');
-  }
+  if (origin === null) return;
+  try {
+    if (normalizeOrigin(origin) === expectedOrigin) return;
+  } catch { /* Invalid or opaque browser origins are never same-origin. */ }
+  throw new ApplicationError(403, 'invalid_origin', '请求来源无效。');
 }

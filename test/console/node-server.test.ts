@@ -17,8 +17,9 @@ beforeEach(async () => {
   mkdirSync(join(assets, 'assets'), { recursive: true });
   writeFileSync(join(assets, 'index.html'), '<h1>UGLINK</h1>');
   writeFileSync(join(assets, 'assets', 'app.js'), 'console.log("example")');
-  writeFileSync(join(directory, 'private.txt'), 'secret');
-  symlinkSync(join(directory, 'private.txt'), join(assets, 'leak.txt'));
+  mkdirSync(join(directory, 'private'));
+  writeFileSync(join(directory, 'private', 'secret.txt'), 'secret');
+  symlinkSync(join(directory, 'private'), join(assets, 'leak'), process.platform === 'win32' ? 'junction' : 'dir');
   store = new SqliteConsoleStore(join(directory, 'console.sqlite'));
   server = createConsoleServer({
     CONSOLE_SESSIONS: store, SESSION_ENCRYPTION_KEY: 'a'.repeat(43)
@@ -42,6 +43,8 @@ describe('Node console HTTP adapter', () => {
     expect(cookie).toContain('uglink_console_session=');
     const next = await (await fetch(`${base}/api/bootstrap`, { headers: { cookie } })).json();
     expect(next).toEqual(first);
+    const refreshed = await fetch(`${base}/api/bootstrap`, { headers: { cookie } });
+    expect(refreshed.headers.get('set-cookie')).toContain(cookie);
     const csrf = await fetch(`${base}/api/connections/cloudflare/reset`, {
       method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: '{}'
     });
@@ -91,7 +94,7 @@ describe('Node console HTTP adapter', () => {
     expect(await page.text()).toContain('UGLINK');
     expect((await fetch(`${base}/assets/missing.js`)).status).toBe(404);
     expect((await fetch(`${base}/.dev.vars`)).status).toBe(404);
-    expect((await fetch(`${base}/leak.txt`)).status).toBe(404);
+    expect((await fetch(`${base}/leak/secret.txt`)).status).toBe(404);
     const head = await fetch(`${base}/assets/app.js`, { method: 'HEAD' });
     expect(await head.text()).toBe('');
     expect(head.headers.get('cache-control')).toContain('immutable');

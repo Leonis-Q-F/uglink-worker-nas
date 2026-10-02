@@ -1,3 +1,4 @@
+import { platformContext, type ExternalRequestContext } from './request-context';
 import { connectCloudflare } from '../../../application/console/connection-service';
 import { createBackupService } from '../../../application/console/backup-service';
 import { createConfigurationService } from '../../../application/console/configuration-service';
@@ -107,21 +108,21 @@ async function connect(
   return bootstrap(env, session);
 }
 
-async function route(request: Request, env: ConsoleWorkerEnv, session: SessionHandle): Promise<Response> {
+async function route(request: Request, env: ConsoleWorkerEnv, session: SessionHandle, context: ExternalRequestContext): Promise<Response> {
   const { pathname } = new URL(request.url);
   if (request.method === 'GET' && pathname === '/api/bootstrap') {
     return json(await bootstrap(env, session));
   }
 
   if (request.method === 'POST' && pathname === '/api/connections/cloudflare') {
-    assertSameOrigin(request);
+    assertSameOrigin(request, context.externalOrigin);
     assertCsrf(request, session);
     const body = await readJson<CloudflareConnectionRequest>(request, 8_192);
     return json(await connect(env, session, body));
   }
 
   if (request.method === 'POST' && pathname === '/api/validate') {
-    assertSameOrigin(request);
+    assertSameOrigin(request, context.externalOrigin);
     assertCsrf(request, session);
     deploymentService(env, session);
     const body = await readJson<{ config?: UglinkConfig }>(request);
@@ -129,7 +130,7 @@ async function route(request: Request, env: ConsoleWorkerEnv, session: SessionHa
   }
 
   if (request.method === 'POST' && pathname === '/api/configuration/draft') {
-    assertSameOrigin(request);
+    assertSameOrigin(request, context.externalOrigin);
     assertCsrf(request, session);
     const target = session.data.target;
     if (!target) throw new ApplicationError(401, 'cloudflare_not_connected', '请先配置 Cloudflare API Token。');
@@ -139,7 +140,7 @@ async function route(request: Request, env: ConsoleWorkerEnv, session: SessionHa
   }
 
   if (request.method === 'POST' && pathname === '/api/configuration/cloud/import') {
-    assertSameOrigin(request);
+    assertSameOrigin(request, context.externalOrigin);
     assertCsrf(request, session);
     const target = session.data.target;
     const cloudConfiguration = session.data.pendingCloudConfiguration;
@@ -155,7 +156,7 @@ async function route(request: Request, env: ConsoleWorkerEnv, session: SessionHa
   }
 
   if (request.method === 'POST' && pathname === '/api/configuration/cloud/dismiss') {
-    assertSameOrigin(request);
+    assertSameOrigin(request, context.externalOrigin);
     assertCsrf(request, session);
     delete session.data.pendingCloudConfiguration;
     await saveSession(env, session);
@@ -163,14 +164,14 @@ async function route(request: Request, env: ConsoleWorkerEnv, session: SessionHa
   }
 
   if (request.method === 'POST' && pathname === '/api/deploy') {
-    assertSameOrigin(request);
+    assertSameOrigin(request, context.externalOrigin);
     assertCsrf(request, session);
     const body = await readJson<DeployRequest>(request);
     return json(await deploymentService(env, session).createDeployment(body), { status: 202 });
   }
 
   if (request.method === 'POST' && pathname === '/api/services/health') {
-    assertSameOrigin(request);
+    assertSameOrigin(request, context.externalOrigin);
     assertCsrf(request, session);
     const body = await readJson<{ config?: UglinkConfig }>(request);
     return json(await deploymentService(env, session).checkPublishedServices(body.config));
@@ -181,7 +182,7 @@ async function route(request: Request, env: ConsoleWorkerEnv, session: SessionHa
   }
 
   if (request.method === 'POST' && pathname === '/api/backups/export') {
-    assertSameOrigin(request);
+    assertSameOrigin(request, context.externalOrigin);
     assertCsrf(request, session);
     const connection = session.data.cloudflare;
     const target = session.data.target;
@@ -207,7 +208,7 @@ async function route(request: Request, env: ConsoleWorkerEnv, session: SessionHa
   }
 
   if (request.method === 'POST' && pathname === '/api/backups/restore') {
-    assertSameOrigin(request);
+    assertSameOrigin(request, context.externalOrigin);
     assertCsrf(request, session);
     const body = await readJson<BackupRestoreRequest>(request, 1_048_576);
     const backup = createBackupService(portableBackupCipher, cloudflareConnectionProvider);
@@ -236,7 +237,7 @@ async function route(request: Request, env: ConsoleWorkerEnv, session: SessionHa
   }
 
   if (request.method === 'POST' && pathname === '/api/connections/cloudflare/reset') {
-    assertSameOrigin(request);
+    assertSameOrigin(request, context.externalOrigin);
     assertCsrf(request, session);
     delete session.data.cloudflare;
     delete session.data.target;
@@ -247,20 +248,22 @@ async function route(request: Request, env: ConsoleWorkerEnv, session: SessionHa
   throw new ApplicationError(404, 'not_found', '找不到这个 API。');
 }
 
+export async function handleConsoleRequest(request: Request, env: ConsoleWorkerEnv, context: ExternalRequestContext): Promise<Response> {
+  const { pathname } = new URL(request.url);
+  if (request.method === 'GET' && pathname === '/api/health') return json({ status: 'ok' });
+  const cookieOptions = { secure: context.secureCookies, refresh: request.method === 'GET' && pathname === '/api/bootstrap' };
+  let session: SessionHandle | undefined;
+  try {
+    session = await getOrCreateSession(request, env);
+    return applySessionCookie(request, await route(request, env, session, context), session, cookieOptions);
+  } catch (error) {
+    const response = apiError(error);
+    return session ? applySessionCookie(request, response, session, cookieOptions) : response;
+  }
+}
+
 export default {
   async fetch(request: Request, env: ConsoleWorkerEnv): Promise<Response> {
-    const { pathname } = new URL(request.url);
-    if (request.method === 'GET' && pathname === '/api/health') {
-      return json({ status: 'ok' });
-    }
-
-    let session: SessionHandle | undefined;
-    try {
-      session = await getOrCreateSession(request, env);
-      return applySessionCookie(request, await route(request, env, session), session);
-    } catch (error) {
-      const response = apiError(error);
-      return session ? applySessionCookie(request, response, session) : response;
-    }
+    return handleConsoleRequest(request, env, platformContext(request));
   }
 } satisfies ExportedHandler<ConsoleWorkerEnv>;
