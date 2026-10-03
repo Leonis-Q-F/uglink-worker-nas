@@ -25,4 +25,13 @@ docker compose -p uglink-proxy-qa -f test/fixtures/proxy/compose.yaml down
 - 三个域名/IP 的会话隔离、旧非 Secure Cookie 升级、页面刷新、错误恢复与容器重启持久化。
 - Docker 发布端口客户端伪造转发头、跨允许来源写入、可信代理多值头拒绝、代理清洗客户端转发头。
 
-2026-10-03 已在本地 Docker 与 Chromium 上通过。完整业务连接和部署的外部调用由单元测试模拟；本测试不执行真实云端部署。真实绿联 NAS 链路未验收，需确认它是否保留外部 Host 或提供可验证的代理元数据。条件性第二固定来源端口未实现。
+零配置验收使用以下覆盖文件，清空应用全部来源环境变量，代理改写 Host 并丢弃全部转发头：
+
+```powershell
+docker compose -p uglink-proxy-qa -f test/fixtures/proxy/compose.yaml -f test/fixtures/proxy/compose.auto.yaml up -d --wait
+$env:QA_AUTO_ORIGIN = 'true'
+node scripts/proxy-browser-qa.mjs
+Remove-Item Env:QA_AUTO_ORIGIN
+```
+
+自动模式额外验证真实 Chrome 的跨站请求触发预检并被拒绝。首次 Cookie 由实际前端初始化生成后再进行协议探测。完整业务连接和部署的外部调用由单元测试模拟；本夹具不执行真实云端部署。真实 NAS 链路须另外验收，不能由本地测试推断。

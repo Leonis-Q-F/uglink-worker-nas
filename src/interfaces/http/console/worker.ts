@@ -251,10 +251,15 @@ async function route(request: Request, env: ConsoleWorkerEnv, session: SessionHa
 export async function handleConsoleRequest(request: Request, env: ConsoleWorkerEnv, context: ExternalRequestContext): Promise<Response> {
   const { pathname } = new URL(request.url);
   if (request.method === 'GET' && pathname === '/api/health') return json({ status: 'ok' });
+  // Custom browser-origin headers must never become usable cross-origin.
+  if (request.method === 'OPTIONS') return json({ error: { code: 'method_not_allowed', message: '不支持跨来源访问。' } }, { status: 405 });
   const cookieOptions = { secure: context.secureCookies, refresh: request.method === 'GET' && pathname === '/api/bootstrap' };
   let session: SessionHandle | undefined;
   try {
-    session = await getOrCreateSession(request, env);
+    session = await getOrCreateSession(request, env, {
+      origin: context.externalOrigin,
+      bindOrigin: context.source === 'browser'
+    });
     return applySessionCookie(request, await route(request, env, session, context), session, cookieOptions);
   } catch (error) {
     const response = apiError(error);

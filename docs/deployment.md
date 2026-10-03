@@ -281,11 +281,15 @@ npm run deploy:console
 
 ## 多入口与反向代理来源配置
 
-Docker 控制台支持局域网 HTTP、标准 HTTPS 反向代理，以及保留外部 Host 的 HTTPS 入口同时使用。出现“请求来源无效”时，应配置浏览器实际访问的来源；不要关闭同源或 CSRF 检查。控制台入口需由 HTTPS 和访问认证保护，来源列表不是登录认证。
+Docker 控制台默认自动适配局域网 HTTP 与 HTTPS 反向代理入口，不依赖厂商品牌或固定域名。保持原 YAML，更新镜像、重新部署并刷新页面即可；不需要新增环境变量。即使代理改写 Host、缺少 Forwarded/X-Forwarded-*，也可以通过控制台页面访问。代理需正常转发应用自定义请求头和 Cookie，不改写浏览器 Origin。
+
+控制台页面从首次初始化开始携带当前页面来源。服务端验证该来源、浏览器 Fetch Metadata（存在时）及 Origin，并保留写操作的 CSRF Token 检查；拒绝跨域预检。来源识别不代替登录认证，远程入口仍需 HTTPS 和访问认证保护。
+
+以下是需要限制来源或管理可信代理时的**可选高级配置**。设置固定来源、允许来源列表、Host 映射或启用代理头模式后，自动识别不覆盖这些策略。
 
 ### 仅局域网直连
 
-默认无需增加配置，代理头不会影响来源。若要限制可访问地址，在 Docker 项目的 `services.console.environment` 中填写完整来源，例如 `UGLINK_ALLOWED_ORIGINS: 'http://nas.example.test:5173'`。实际使用时将示例替换为 NAS 的局域网 IP 或域名及端口。
+默认无需增加配置。若要限制可访问地址，在 Docker 项目的 `services.console.environment` 中填写完整来源，例如 `UGLINK_ALLOWED_ORIGINS: 'http://nas.example.test:5173'`。实际使用时将示例替换为 NAS 的局域网 IP 或域名及端口。
 
 ### 保留外部 Host 的入口（包括符合此条件的绿联远程入口）
 
@@ -327,8 +331,10 @@ environment:
 
 无效配置启动失败；未允许的目标返回 `421 unconfigured_origin`，代理头不完整或冲突返回 `400 invalid_proxy_headers`，可信代理完全缺少元数据返回 `400 proxy_context_missing`，浏览器来源与本次目标不同返回 `403 invalid_origin`。即使两个地址都在允许列表中，也不允许互相跨来源写入。缺少 Origin 的兼容请求仍须有效会话及 CSRF Token。精确 `GET /api/health` 不创建会话，可独立用于容器健康检查。
 
-本仓库 Compose 已显式注入这些参数；自行粘贴 GUI YAML 时要加上 `environment`。只修改用于 Compose 插值的 `.env` 并不代表参数进入了容器。
+本仓库 Compose 已显式注入这些参数。只有选择上述高级配置时，GUI YAML 才需要增加对应的 `environment`；默认自动模式无需改动 YAML。只修改用于 Compose 插值的 `.env` 并不代表参数进入了容器。
 
-不同域名和 LAN IP 使用各自 host-only Cookie，可能需要分别连接 Cloudflare；不提供跨域登录同步。同主机名不同端口/协议的 Cookie 不隔离，不属于独立会话支持范围。bootstrap 会刷新已有 Cookie 属性但不延长服务端会话期限。回滚后浏览器可能仍保存 Secure Cookie，必要时仅清除对应站点 Cookie，保留服务端数据卷与加密密钥。
+不同域名和 LAN IP 使用各自 host-only Cookie，可能需要分别连接 Cloudflare；不提供跨域登录同步。自动模式按完整来源区分 Cookie 名，使同主机名不同端口/协议可以分别使用。bootstrap 会刷新已有 Cookie 属性但不延长服务端会话期限。回滚后浏览器可能仍保存 Secure Cookie，必要时仅清除对应站点 Cookie，保留服务端数据卷与加密密钥。
 
-本地 Docker/TLS 代理可以验证上述协议，但不能证明真实绿联链路传递了哪些信息。如果远程入口既改写 Host 又丢失外部协议/主机信息，需要可控中间代理或调整入口拓扑；目前未加入条件性的第二固定来源监听端口。真实绿联设备链路仍需用户按实际入口验收，不能依赖厂商品牌域名自动放行。
+自动模式会将会话绑定到经过验证的浏览器来源。旧会话首次升级时保留连接、会话 ID 和有效期，并迁移到对应来源的 Cookie 名。其他入口创建独立会话，不覆盖旧入口。强行将已绑定会话移植到另一来源会返回 `403 session_origin_mismatch`，不删除原会话或改写 Cookie。Cookie 分名不改变浏览器本身按域发送 Cookie 的规则，不能防御同主机其他服务窃取 Cookie。
+
+代理若删除自定义请求头、修改浏览器 Origin 或干预跨域策略，需要修正代理行为或选择上述显式配置；应用不会因为域名属于某个厂商而自动放行。

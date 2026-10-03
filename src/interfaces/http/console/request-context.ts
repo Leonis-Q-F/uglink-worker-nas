@@ -3,7 +3,7 @@ export interface ExternalRequestContext {
   readonly externalOrigin: string;
   readonly externalUrl: string;
   readonly secureCookies: boolean;
-  readonly source: 'direct' | 'trusted-proxy' | 'configured-host' | 'legacy';
+  readonly source: 'direct' | 'trusted-proxy' | 'configured-host' | 'legacy' | 'browser';
 }
 
 export function normalizeAuthority(value: string): string {

@@ -6,12 +6,13 @@ for (const [port, externalHost, standard] of [[443, 'proxy.test:15443', true], [
   httpsServer(tls, (incoming, outgoing) => {
     const headers = { ...incoming.headers };
     for (const name of Object.keys(headers)) if (name === 'forwarded' || name.startsWith('x-forwarded-')) delete headers[name];
-    headers.host = standard ? 'console:8787' : externalHost;
-    if (standard) {
+    headers.host = process.env.OPAQUE_PROXY === 'true' ? 'internal:8787' : standard ? 'console:8787' : externalHost;
+    if (standard && process.env.OPAQUE_PROXY !== 'true') {
       headers['x-forwarded-host'] = externalHost;
       headers['x-forwarded-proto'] = 'https';
     }
     const upstream = request({ host: 'console', port: 8787, path: incoming.url, method: incoming.method, headers }, response => {
+      if (incoming.method === 'OPTIONS') console.log(`Denied browser preflight: ${response.statusCode}`);
       outgoing.writeHead(response.statusCode, response.headers);
       response.pipe(outgoing);
     });

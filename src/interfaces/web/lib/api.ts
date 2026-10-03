@@ -18,9 +18,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
     credentials: 'same-origin',
+    mode: 'same-origin',
     headers: {
       Accept: 'application/json',
-      ...init?.headers
+      ...init?.headers,
+      'X-Uglink-Console-Origin': window.location.origin
     }
   });
   const body = await response.json() as T | ApiErrorPayload;

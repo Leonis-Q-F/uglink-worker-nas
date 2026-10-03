@@ -3,6 +3,7 @@ import { normalizeAuthority, normalizeOrigin } from './request-context';
 
 export type ProxyHeaderMode = 'off' | 'forwarded-single' | 'x-forwarded-single';
 export interface ServerConfig {
+  readonly automaticBrowserOrigin: boolean;
   readonly mode: ProxyHeaderMode;
   readonly publicOrigin?: string;
   readonly allows: (origin: string) => boolean;
@@ -63,6 +64,7 @@ export function parseServerConfig(env: Record<string, string | undefined> = {}):
     const publicOrigin = env.UGLINK_PUBLIC_ORIGIN ? normalizeOrigin(env.UGLINK_PUBLIC_ORIGIN) : undefined;
     if (publicOrigin && (allowed.size || cidrs.length || mappings.size || mode !== 'off')) throw new Error('UGLINK_PUBLIC_ORIGIN cannot be combined with multi-entry settings');
     return Object.freeze({
+      automaticBrowserOrigin: !publicOrigin && !allowed.size && !mappings.size && mode === 'off',
       mode: mode as ProxyHeaderMode, publicOrigin,
       allows: (origin: string) => !allowed.size || allowed.has(origin),
       mappedOrigin: (host: string) => mappings.get(host),

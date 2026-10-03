@@ -13,6 +13,7 @@ export interface SessionData {
   createdAt: number;
   expiresAt: number;
   csrfToken: string;
+  externalOrigin?: string;
   cloudflare?: CloudflareConnection;
   target?: WorkerTarget;
   pendingCloudConfiguration?: UglinkConfig;
@@ -22,6 +23,7 @@ export interface SessionHandle {
   id: string;
   data: SessionData;
   shouldSetCookie: boolean;
+  cookieName?: string;
 }
 
 export interface ConsoleSessionEnvironment {
@@ -59,28 +61,49 @@ function associatedData(id: string): string {
   return `uglink-console-session:${id}`;
 }
 
-export async function getOrCreateSession(request: Request, env: ConsoleSessionEnvironment): Promise<SessionHandle> {
-  const candidate = parseCookies(request).get(COOKIE_NAME);
+export async function getOrCreateSession(request: Request, env: ConsoleSessionEnvironment, options?: { origin: string; bindOrigin: boolean }): Promise<SessionHandle> {
+  const cookies = parseCookies(request);
+  const cookieName = options?.bindOrigin
+    ? `${COOKIE_NAME}_${Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(options.origin)))).map(byte => byte.toString(16).padStart(2, '0')).join('').slice(0, 32)}`
+    : COOKIE_NAME;
+  const legacy = cookieName !== COOKIE_NAME && !cookies.has(cookieName);
+  const candidate = cookies.get(cookieName) ?? (legacy ? cookies.get(COOKIE_NAME) : undefined);
   if (candidate && /^[A-Za-z0-9_-]{40,80}$/u.test(candidate)) {
     const sealed = await env.CONSOLE_SESSIONS.get(sessionKey(candidate));
     if (sealed) {
+      let data: SessionData | undefined;
       try {
-        const data = await openJson<SessionData>(sealed, env.SESSION_ENCRYPTION_KEY, associatedData(candidate));
-        if (data.version === 2 && data.expiresAt > Date.now()) {
-          return { id: candidate, data, shouldSetCookie: false };
-        }
+        data = await openJson<SessionData>(sealed, env.SESSION_ENCRYPTION_KEY, associatedData(candidate));
       } catch (error) {
         console.warn(JSON.stringify({
           event: 'invalid_console_session',
           error: error instanceof Error ? error.message : String(error)
         }));
       }
+      if (data?.version === 2 && data.expiresAt > Date.now()) {
+        if (data.externalOrigin && data.externalOrigin !== options?.origin) {
+          // A legacy host-wide cookie can belong to a different port/scheme.
+          // Leave it intact and create an independent origin-scoped session.
+          if (legacy) return createSession(env, cookieName, options);
+          throw new ApplicationError(403, 'session_origin_mismatch', '当前会话属于其他访问入口，请使用原入口打开控制台。');
+        }
+        const handle = { id: candidate, data, cookieName, shouldSetCookie: legacy };
+        if (!data.externalOrigin && options?.bindOrigin) {
+          data.externalOrigin = options.origin;
+          await saveSession(env, handle);
+        }
+        return handle;
+      }
       await env.CONSOLE_SESSIONS.delete(sessionKey(candidate));
     }
   }
+  return createSession(env, cookieName, options);
+}
 
+async function createSession(env: ConsoleSessionEnvironment, cookieName: string, options?: { origin: string; bindOrigin: boolean }): Promise<SessionHandle> {
   const id = randomToken(32);
-  const handle = { id, data: newSession(), shouldSetCookie: true } satisfies SessionHandle;
+  const handle = { id, data: newSession(), cookieName, shouldSetCookie: true } satisfies SessionHandle;
+  if (options?.bindOrigin) handle.data.externalOrigin = options.origin;
   await saveSession(env, handle);
   return handle;
 }
@@ -99,7 +122,7 @@ export function applySessionCookie(request: Request, response: Response, handle:
   const maxAge = Math.max(0, Math.floor((handle.data.expiresAt - Date.now()) / 1000));
   headers.append(
     'Set-Cookie',
-    `${COOKIE_NAME}=${handle.id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`
+    `${handle.cookieName ?? COOKIE_NAME}=${handle.id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`
   );
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }

@@ -23,6 +23,28 @@ export function resolveNodeContext(facts: NodeRequestFacts, config: ServerConfig
   const direct = normalizeOrigin(`http://${host}`);
   // Exact liveness route only: no session, credentials, proxy parsing or business action.
   if (facts.method === 'GET' && target === '/api/health') return requestContext(direct, target, 'direct');
+  // The first-party UI sends a non-safelisted header, including on bootstrap.
+  // Cross-origin JS needs a preflight, which this server never authorizes.
+  // This is a browser request boundary, NOT proxy identity or authentication.
+  if (config.automaticBrowserOrigin && target?.startsWith('/api/')) {
+    const claims = rawHeaderValues(facts.rawHeaders, 'x-uglink-console-origin');
+    if (claims.length) {
+      try {
+        if (claims.length !== 1) throw new Error();
+        const origin = normalizeOrigin(claims[0]!);
+        const sites = rawHeaderValues(facts.rawHeaders, 'sec-fetch-site');
+        if (sites.length > 1 || (sites.length === 1 && sites[0] !== 'same-origin')) throw new Error();
+        const origins = rawHeaderValues(facts.rawHeaders, 'origin');
+        if (origins.length > 1 || (origins.length === 1 && normalizeOrigin(origins[0]!) !== origin)) throw new Error();
+        return requestContext(origin, target, 'browser');
+      } catch {
+        throw new ApplicationError(403, 'invalid_origin', '请求来源无效，请从控制台页面刷新后重试。');
+      }
+    }
+    if (rawHeaderValues(facts.rawHeaders, 'cookie').some(value => /(?:^|;\s*)uglink_console_session_[a-f0-9]{32}=/u.test(value))) {
+      throw new ApplicationError(403, 'invalid_origin', '请从控制台页面刷新后重试。');
+    }
+  }
   let origin = config.publicOrigin;
   let source: ExternalRequestContext['source'] = origin ? 'legacy' : 'direct';
   const mapped = config.mappedOrigin(host);

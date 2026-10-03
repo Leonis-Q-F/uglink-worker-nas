@@ -1,0 +1,6 @@
+services:
+  console:
+    environment: !reset {}
+  proxy:
+    environment:
+      OPAQUE_PROXY: 'true'
