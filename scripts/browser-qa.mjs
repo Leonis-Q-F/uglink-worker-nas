@@ -43,6 +43,8 @@ let publishedHealthRequests = 0;
 let publishedServicesHealthy = true;
 let forceEmptyDeploymentServices = false;
 let diagnosticEntries = [];
+let containerLogRequests = 0;
+let workerLogRequests = 0;
 let cloudConfiguration;
 
 function emptyConfig() {
@@ -176,28 +178,32 @@ await page.route('**/api/**', async (route) => {
         detail: publishedServicesHealthy ? 'Worker 已部署且域名配置正常' : '服务入口返回 HTTP 404',
         code: publishedServicesHealthy ? 'healthy' : 'service_entry_http_error',
         stage: publishedServicesHealthy ? 'worker_configuration' : 'service_entry',
-        httpStatus: publishedServicesHealthy ? 200 : 404
-      }));
-    if (!publishedServicesHealthy) {
-      const previousOccurrences = diagnosticEntries[0]?.occurrences || 0;
-      diagnosticEntries = [{
-        id: 'qa-diagnostic-service-entry',
-        source: 'health_check',
-        severity: 'error',
-        stage: 'service_entry',
-        code: 'service_entry_http_error',
-        summary: '服务入口返回 HTTP 404',
-        httpStatus: 404,
-        firstObservedAt: diagnosticEntries[0]?.firstObservedAt || new Date().toISOString(),
-        lastObservedAt: new Date().toISOString(),
-        occurrences: previousOccurrences + 1,
-        service: {
-          name: services[0]?.serviceName,
-          hostname: services[0]?.hostname,
-          port: services[0]?.port
+        httpStatus: publishedServicesHealthy ? 200 : 404,
+        data: {
+          request: { method: 'GET', url: `https://${service.hostname}/.well-known/uglink-worker-health` },
+          response: { status: publishedServicesHealthy ? 200 : 404, statusText: publishedServicesHealthy ? 'OK' : 'Not Found' },
+          durationMs: 37
         }
-      }];
-    }
+      }));
+    const checkedAt = new Date().toISOString();
+    diagnosticEntries = [...services.map((service) => ({
+        id: `qa-check-${publishedHealthRequests}-${service.hostname}`,
+        source: 'health_check',
+        severity: publishedServicesHealthy ? 'info' : 'error',
+        stage: service.stage,
+        code: service.code,
+        summary: service.detail,
+        httpStatus: service.httpStatus,
+        data: service.data,
+        firstObservedAt: checkedAt,
+        lastObservedAt: checkedAt,
+        occurrences: 1,
+        service: {
+          name: service.serviceName,
+          hostname: service.hostname,
+          port: service.port
+        }
+      })), ...diagnosticEntries].slice(0, 100);
     return jsonResponse(route, {
       checkedAt: new Date().toISOString(),
       services
@@ -205,6 +211,32 @@ await page.route('**/api/**', async (route) => {
   }
   if (request.method() === 'GET' && url.pathname === '/api/diagnostics') {
     return jsonResponse(route, { entries: diagnosticEntries });
+  }
+  if (request.method() === 'POST' && url.pathname === '/api/diagnostics/container-stream') {
+    containerLogRequests += 1;
+    const logs = [
+      { id: 'qa-container-start', timestamp: Date.now() - 1, level: 'info', source: 'container', stream: 'stdout',
+        message: '[启动] 控制台已就绪，端口 8787，存储 SQLite。' },
+      { id: 'qa-container-warning', timestamp: Date.now(), level: 'info', source: 'container', stream: 'stderr',
+        message: '(node:1) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)' }
+    ];
+    return route.fulfill({ contentType: 'text/event-stream', body:
+      `event: status\ndata: ${JSON.stringify({ state: 'connected', message: '容器运行日志已连接。' })}\n\n`
+      + logs.map((log) => `event: log\ndata: ${JSON.stringify(log)}\n\n`).join('')
+    });
+  }
+  if (request.method() === 'POST' && url.pathname === '/api/diagnostics/stream') {
+    workerLogRequests += 1;
+    const log = {
+      id: 'qa-worker-native-log', timestamp: Date.now(), level: 'info', source: 'worker',
+      hostname: 'qa-api.example.com', message: '{"event":"ugreen_auth_phase","phase":"verify_check","durationMs":8}',
+      data: { event: 'ugreen_auth_phase', phase: 'verify_check', durationMs: 8 }
+    };
+    return route.fulfill({ contentType: 'text/event-stream', body:
+      `event: status\ndata: ${JSON.stringify({ state: 'connected', message: 'Worker 实时日志已连接。' })}\n\n`
+      + `event: log\ndata: ${JSON.stringify(log)}\n\n`
+      + `event: status\ndata: ${JSON.stringify({ state: 'closed', message: '模拟日志流已结束。' })}\n\n`
+    });
   }
   if (request.method() === 'POST' && url.pathname === '/api/deploy') {
     const body = request.postDataJSON();
@@ -434,10 +466,29 @@ try {
   assert((await errorStatus.count()) === 1, 'The abnormal service provides a diagnostics entry point.');
   await errorStatus.click();
   await page.getByRole('heading', { name: '故障诊断', exact: true }).waitFor();
-  assert(await page.getByText('服务入口', { exact: true }).first().isVisible(), 'The diagnostics page identifies the failed stage.');
-  assert(await page.locator('code').filter({ hasText: 'service_entry_http_error' }).first().isVisible(), 'The diagnostics page shows the machine-readable error code.');
-  assert(await page.getByText('HTTP 404', { exact: true }).first().isVisible(), 'The diagnostics page shows the Worker entry HTTP status.');
-  assert(await page.getByText('服务入口返回 HTTP 404', { exact: true }).first().isVisible(), 'The diagnostics page shows the specific failure cause.');
+  await page.getByTestId('log-row').filter({ hasText: '[启动] 控制台已就绪' }).waitFor();
+  assert(containerLogRequests > 0, 'The default diagnostics source reads the console container output.');
+  assert(workerLogRequests === 0, 'Opening diagnostics does not create a Worker Tail connection.');
+  const containerWarning = page.getByTestId('log-row').filter({ hasText: 'ExperimentalWarning' });
+  assert(await containerWarning.isVisible(), 'Native stderr warnings are visible without expanding JSON.');
+  assert(await containerWarning.locator('summary').count() === 0, 'Container output is directly readable.');
+  await page.screenshot({ path: screenshotPath('diagnostics-container.png'), fullPage: false });
+  await page.getByLabel('日志来源', { exact: true }).selectOption('console');
+  const failedLog = page.getByTestId('log-row').filter({ hasText: 'HTTP 404' }).first();
+  await failedLog.waitFor();
+  assert(await failedLog.isVisible(), 'The diagnostics log prints the native HTTP result.');
+  await failedLog.locator('summary').click();
+  assert(await failedLog.getByText(/service_entry_http_error/).isVisible(), 'Expanded JSON preserves the machine-readable error code.');
+  await page.getByLabel('日志来源', { exact: true }).selectOption('worker');
+  const nativeWorkerLog = page.getByTestId('log-row').filter({ hasText: 'ugreen_auth_phase' }).first();
+  await nativeWorkerLog.waitFor();
+  assert(await nativeWorkerLog.isVisible(), 'Native Worker output is available through the optional Worker source.');
+  await page.getByLabel('搜索日志', { exact: true }).fill('verify_check');
+  await page.getByTestId('log-row').filter({ hasText: 'HTTP 404' }).first().waitFor({ state: 'hidden' });
+  assert(await page.getByTestId('log-row').count() >= 1, 'Search matches native Worker JSON.');
+  assert(await page.getByTestId('log-row').filter({ hasText: 'HTTP 404' }).count() === 0, 'Search filters the visible logs.');
+  await page.getByLabel('搜索日志', { exact: true }).fill('');
+  await page.getByLabel('日志来源', { exact: true }).selectOption('console');
   const healthRequestsBeforeManualCheck = publishedHealthRequests;
   const recheckResponse = page.waitForResponse((response) => response.url().endsWith('/api/services/health') && response.request().method() === 'POST');
   await page.getByRole('button', { name: '重新检查', exact: true }).click();
@@ -452,7 +503,7 @@ try {
   await overwriteResponse;
   assert(deploymentRequests === deploymentsBeforeOverwrite + 1, 'Overwrite deployment creates a new deployment request.');
   assert(lastDeploymentMode === 'overwrite', 'Redeployment explicitly uses overwrite mode.');
-  await page.getByText('覆盖部署进行中', { exact: true }).waitFor();
+  await page.getByTestId('log-row').filter({ hasText: '正在等待访问域名生效' }).first().waitFor();
   publishedServicesHealthy = true;
 
   await page.locator('.app-sidebar button').filter({ hasText: '权限与安全' }).click();

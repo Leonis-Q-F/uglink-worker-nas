@@ -76,4 +76,57 @@ describe('service entry network failures', () => {
     await httpServiceHealthChecker.check([entry], true);
     expect(entry).toMatchObject({ healthy: true, code: 'healthy', httpStatus: 200 });
   });
+
+  it('retains the network error and nested cause alongside the compatible status result', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed', {
+      cause: Object.assign(new Error('getaddrinfo ENOTFOUND app.example.com'), { code: 'ENOTFOUND' })
+    })));
+    const entry = service();
+    await httpServiceHealthChecker.check([entry], true);
+    expect(entry.data).toMatchObject({
+      request: { url: 'https://app.example.com/.well-known/uglink-worker-health', method: 'GET' },
+      durationMs: expect.any(Number),
+      error: {
+        name: 'TypeError', message: 'fetch failed',
+        cause: { message: 'getaddrinfo ENOTFOUND app.example.com', code: 'ENOTFOUND' }
+      }
+    });
+    expect(entry.httpStatus).toBeUndefined();
+  });
+
+  it('retains HTTP response details and sanitizes structured response secrets', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
+      error: 'upstream refused the request', password: 'secret-in-body', token: 'upstream-token'
+    }, { status: 503, statusText: 'Service Unavailable' })));
+    const entry = service();
+    await httpServiceHealthChecker.check([entry], true);
+    expect(entry.data).toMatchObject({
+      response: {
+        status: 503, statusText: 'Service Unavailable',
+        body: { error: 'upstream refused the request' }, truncated: false
+      }, durationMs: expect.any(Number)
+    });
+    expect(JSON.stringify(entry.data)).not.toContain('secret-in-body');
+    expect(JSON.stringify(entry.data)).not.toContain('upstream-token');
+    expect(entry).toMatchObject({ healthy: false, code: 'service_entry_http_error', httpStatus: 503 });
+  });
+
+  it('bounds a large response body and keeps the HTTP failure status', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('x'.repeat(20_000), { status: 502 })));
+    const entry = service();
+    await httpServiceHealthChecker.check([entry], true);
+    expect(entry.data).toMatchObject({ response: { status: 502, truncated: true } });
+    expect(JSON.stringify(entry.data).length).toBeLessThan(8_000);
+    expect(entry).toMatchObject({ healthy: false, code: 'service_entry_http_error', httpStatus: 502 });
+  });
+
+  it('keeps a known HTTP failure when reading its body also fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(new ReadableStream({
+      start(controller) { controller.error(new Error('upstream body interrupted')); }
+    }), { status: 503 })));
+    const entry = service();
+    await httpServiceHealthChecker.check([entry], true);
+    expect(entry).toMatchObject({ healthy: false, code: 'service_entry_http_error', httpStatus: 503 });
+    expect(entry.data).toMatchObject({ response: { status: 503 }, error: { message: 'upstream body interrupted' } });
+  });
 });

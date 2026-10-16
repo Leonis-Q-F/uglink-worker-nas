@@ -71,7 +71,7 @@ interface CloudConfigurationDialogProps {
 
 const SECTION_COPY: Record<Section, { label: string; description: string }> = {
   services: { label: '服务配置', description: '管理 NAS 连接与访问域名' },
-  diagnostics: { label: '故障诊断', description: '查看服务检查与部署错误' },
+  diagnostics: { label: '故障诊断', description: '查看容器运行输出、网络日志与操作记录' },
   security: { label: '权限与安全', description: '管理 API Token 与数据安全' }
 };
 
@@ -702,6 +702,8 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
     }
   }, []);
 
+  const refreshDiagnostics = useCallback(() => loadDiagnostics(false), [loadDiagnostics]);
+
   const checkServices = useCallback(async (publishedConfig: UglinkConfig) => {
     const requestVersion = ++healthRequestVersion.current;
     setCheckingHealth(true);
@@ -1011,9 +1013,11 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
             </>
           ) : section === 'diagnostics' ? (
             <DiagnosticsPage
+              csrfToken={bootstrap.csrfToken}
               entries={diagnostics.entries}
               health={publishedHealth}
-              healthError={healthCheckError || diagnosticsError}
+              healthError={healthCheckError}
+              diagnosticsError={diagnosticsError}
               focusedHostname={focusedHostname}
               loading={diagnosticsLoading}
               checking={checkingHealth}
@@ -1022,6 +1026,7 @@ export function Dashboard({ bootstrap, onConnectionReset }: DashboardProps) {
               job={job}
               onClearFocus={() => setFocusedHostname(undefined)}
               onCheck={() => void checkServices(savedConfig)}
+              onRefresh={refreshDiagnostics}
               onRedeploy={redeploy}
             />
           ) : section === 'security' ? (

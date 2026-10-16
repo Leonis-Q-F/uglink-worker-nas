@@ -6,6 +6,7 @@ import type {
   WorkerTarget
 } from '../../domain/deployment/model';
 import type { CloudflareConnection } from './contracts';
+import type { RuntimeLogEntry } from '../../domain/logging/model';
 import type {
   EncryptedControlBackup,
   PersistedConfigurationState
@@ -17,6 +18,16 @@ export interface ConsoleStore {
   get<T>(key: string, type: 'json'): Promise<T | null>;
   put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
   delete(key: string): Promise<void>;
+}
+
+/** Local process capability: no Docker daemon or Cloudflare Tail access is involved. */
+export interface ContainerLogSource {
+  registerSecrets(secrets: readonly string[]): void;
+  subscribe(onEntry: (entry: RuntimeLogEntry) => void, onClose?: () => void, afterId?: string): {
+    history: RuntimeLogEntry[];
+    unsubscribe(): void;
+  };
+  readonly persistent: boolean;
 }
 
 export interface KvNamespaceReference {

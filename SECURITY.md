@@ -20,6 +20,7 @@
 - Compose 默认监听 `0.0.0.0:5173`，可从主机的其他网络接口访问。请仅在可信局域网使用；仅供本机访问时，在 `.env` 中设置 `UGLINK_BIND_ADDRESS=127.0.0.1`。
 - Compose 默认使用 Docker 管理的 `uglink-data` 卷，避免宿主机目录权限迫使容器以 root 身份运行。
 - `uglink-data` 卷包含会话加密密钥和加密后的 Cloudflare 连接。备份、迁移和删除该卷时应按敏感数据处理；不要执行 `docker compose down --volumes`。
+- 控制台自身运行输出经脱敏写入 `/data/logs`；流接口要求已连接的控制台会话、同源请求与 CSRF Token。不挂载 Docker socket，也不读取其他容器的日志。该处理不改写进程送往 Docker 的原始标准输出与标准错误。
 - 如需远程访问控制台，应放在具备身份验证和 HTTPS 的反向代理或 Cloudflare Access 后面。
 - 默认浏览器来源识别通过非简单请求头、拒绝 CORS 预检、Origin/Fetch Metadata 校验和 CSRF Token 共同保护。自定义来源头不是身份认证；非浏览器客户端可以伪造请求头，仍不能因此获得他人的会话与 CSRF Token。代理须保留这些头和 Cookie，不可自行向不可信来源开放带凭据的 CORS。
 - 自动模式会话绑定具体来源，首次升级绑定保留原会话内容与期限；来源不匹配不重写 Cookie、不删除原数据。显式配置的来源或可信代理策略优先，不受浏览器自报来源覆盖。

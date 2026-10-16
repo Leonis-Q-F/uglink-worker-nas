@@ -1,5 +1,6 @@
 import type { ServiceHealthChecker } from '../../application/console/ports';
 import type { DiagnosticStage, ServiceHealth } from '../../domain/deployment/model';
+import { sanitizeLogValue } from '../security/log-redaction';
 
 const HEALTH_RESPONSE_MAX_BYTES = 4_096;
 
@@ -8,6 +9,15 @@ interface HealthFailure {
   detail: string;
   stage: DiagnosticStage;
   httpStatus?: number;
+}
+
+function httpFailure(status: number): HealthFailure {
+  return {
+    code: 'service_entry_http_error',
+    detail: `服务入口返回 HTTP ${status}`,
+    stage: 'service_entry',
+    httpStatus: status
+  };
 }
 
 function networkFailure(error: unknown): HealthFailure | undefined {
@@ -49,59 +59,69 @@ function markFailure(service: ServiceHealth, failure: HealthFailure): void {
   else delete service.httpStatus;
 }
 
-async function readHealthResponse(response: Response): Promise<{
-  status?: string;
-  hostnameConfigured?: boolean;
-}> {
-  if (!response.body) return {};
+async function readHealthBody(response: Response): Promise<{ body: string; truncated: boolean }> {
+  if (!response.body) return { body: '', truncated: false };
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let bytesRead = 0;
   let body = '';
+  let truncated = false;
   try {
     while (true) {
       const chunk = await reader.read();
       if (chunk.done) break;
+      const remaining = HEALTH_RESPONSE_MAX_BYTES - bytesRead;
+      body += decoder.decode(chunk.value.subarray(0, remaining), { stream: true });
       bytesRead += chunk.value.byteLength;
       if (bytesRead > HEALTH_RESPONSE_MAX_BYTES) {
+        truncated = true;
         await reader.cancel('health response exceeds size limit');
-        throw new Error('Health response exceeds size limit.');
+        break;
       }
-      body += decoder.decode(chunk.value, { stream: true });
     }
     body += decoder.decode();
   } finally {
     reader.releaseLock();
   }
-  return JSON.parse(body) as { status?: string; hostnameConfigured?: boolean };
+  return { body, truncated };
 }
 
 export const httpServiceHealthChecker: ServiceHealthChecker = {
   async check(services, monitoringExisting = false): Promise<void> {
     await Promise.all(services.map(async (service) => {
+      const startedAt = Date.now();
+      const url = `https://${service.hostname}/.well-known/uglink-worker-health`;
+      const data: {
+        request: { url: string; method: string };
+        response?: { status: number; statusText: string; body?: unknown; truncated?: boolean };
+        error?: unknown;
+      } = { request: { url, method: 'GET' } };
       try {
         const workerResponse = await fetch(
-          `https://${service.hostname}/.well-known/uglink-worker-health`,
+          url,
           {
             cache: 'no-store',
             headers: { Accept: 'application/json' },
             signal: AbortSignal.timeout(5_000)
           }
         );
+        data.response = { status: workerResponse.status, statusText: workerResponse.statusText };
+        const responseBody = await readHealthBody(workerResponse);
+        data.response.body = responseBody.body;
+        data.response.truncated = responseBody.truncated;
+        // Keep JSON structured so sensitive response fields can be removed by key.
+        try { data.response.body = JSON.parse(responseBody.body) as unknown; } catch { /* Preserve bounded text. */ }
         if (!workerResponse.ok) {
-          markFailure(service, {
-            code: 'service_entry_http_error',
-            detail: `服务入口返回 HTTP ${workerResponse.status}`,
-            stage: 'service_entry',
-            httpStatus: workerResponse.status
-          });
-          await workerResponse.body?.cancel();
+          markFailure(service, httpFailure(workerResponse.status));
           return;
         }
-        let health: Awaited<ReturnType<typeof readHealthResponse>>;
+        let health: { status?: string; hostnameConfigured?: boolean };
         try {
-          health = await readHealthResponse(workerResponse);
+          if (responseBody.truncated) throw new Error('Health response exceeds size limit.');
+          health = JSON.parse(responseBody.body) as typeof health;
+          if (!health || typeof health !== 'object') throw new Error('Health response is not an object.');
         } catch (error) {
+          data.error = error;
           if (networkFailure(error)) throw error;
           markFailure(service, {
             code: 'worker_health_invalid_response',
@@ -124,6 +144,11 @@ export const httpServiceHealthChecker: ServiceHealthChecker = {
         service.stage = 'worker_configuration';
         service.httpStatus = workerResponse.status;
       } catch (error) {
+        data.error = error;
+        if (data.response && (data.response.status < 200 || data.response.status >= 300)) {
+          markFailure(service, httpFailure(data.response.status));
+          return;
+        }
         markFailure(service, networkFailure(error) ?? (monitoringExisting
           ? {
               code: 'service_entry_unreachable',
@@ -135,6 +160,8 @@ export const httpServiceHealthChecker: ServiceHealthChecker = {
               detail: '暂时无法连接 Worker 服务入口，域名或证书可能尚未生效；若持续失败，请查看运行日志并检查 DNS 和网络',
               stage: 'service_entry'
             }));
+      } finally {
+        service.data = sanitizeLogValue({ ...data, durationMs: Date.now() - startedAt });
       }
     }));
   }

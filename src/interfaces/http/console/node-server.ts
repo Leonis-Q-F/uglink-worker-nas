@@ -45,7 +45,7 @@ async function send(response: Response, outgoing: ServerResponse, head = false):
     outgoing.end();
     return;
   }
-  // API responses are bounded JSON; stream them with backpressure.
+  // JSON and live diagnostic SSE both stream with backpressure.
   await pipeline(response.body, outgoing);
 }
 
@@ -90,6 +90,11 @@ export function createConsoleServer(env: ConsoleWorkerEnv, assetDirectory: strin
   const config = typeof options === 'string' ? parseServerConfig({ UGLINK_PUBLIC_ORIGIN: options }) : options ?? parseServerConfig();
   const server = createServer({ requestTimeout: 30_000, headersTimeout: 15_000 }, (incoming, outgoing) => {
     void (async () => {
+      const disconnected = new AbortController();
+      const abortIncoming = () => disconnected.abort();
+      const abortOutgoing = () => { if (!outgoing.writableEnded) disconnected.abort(); };
+      incoming.once('aborted', abortIncoming);
+      outgoing.once('close', abortOutgoing);
       try {
         const context = resolveNodeContext({ rawHeaders: incoming.rawHeaders, remoteAddress: incoming.socket.remoteAddress,
           target: incoming.url, method: incoming.method }, config);
@@ -103,7 +108,7 @@ export function createConsoleServer(env: ConsoleWorkerEnv, assetDirectory: strin
           if (value !== undefined) headers.set(name, Array.isArray(value) ? value.join(', ') : value);
         }
         const body = await readBody(incoming);
-        const request = new Request(url, { method: incoming.method, headers, body });
+        const request = new Request(url, { method: incoming.method, headers, body, signal: disconnected.signal });
         await send(await handleConsoleRequest(request, env, context), outgoing, incoming.method === 'HEAD');
       } catch (error) {
         if (outgoing.destroyed) return;
@@ -111,6 +116,9 @@ export function createConsoleServer(env: ConsoleWorkerEnv, assetDirectory: strin
         // Close rejected uploads instead of retaining an unconsumed request body.
         outgoing.setHeader('Connection', 'close');
         await send(apiError(error), outgoing).catch(() => outgoing.destroy());
+      } finally {
+        incoming.removeListener('aborted', abortIncoming);
+        outgoing.removeListener('close', abortOutgoing);
       }
     })();
   });

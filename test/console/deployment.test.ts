@@ -110,6 +110,10 @@ describe('production Cloudflare deployment', () => {
       stage: 'worker_configuration',
       httpStatus: 200
     })]);
+    expect(await deployment.listDiagnostics()).toEqual([expect.objectContaining({
+      source: 'health_check', severity: 'info', code: 'healthy', httpStatus: 200,
+      data: expect.objectContaining({ response: expect.objectContaining({ status: 200 }) })
+    })]);
 
     healthResult = 'unconfigured';
     const unhealthy = await deployment.checkPublishedServices(configuredConfig());
@@ -140,6 +144,7 @@ describe('production Cloudflare deployment', () => {
       httpStatus: 404,
       service: { name: 'app', hostname: 'app.example.com', port: 8080 }
     });
+    expect(diagnostics).toHaveLength(3);
   });
 
   it('provisions KV, uploads the Worker, preserves Secret bindings, and reconciles domains', async () => {
@@ -419,9 +424,76 @@ describe('production Cloudflare deployment', () => {
 
   it('fails safely before creating resources when the first deployment has no password', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => envelope(null, 404)));
-    const job = await service().createDeployment({ config: configuredConfig() });
+    const deployment = service();
+    const job = await deployment.createDeployment({ config: configuredConfig() });
     expect(job.phase).toBe('failed');
     expect(job.message).toContain('首次发布需要填写 NAS 密码');
+    expect(await deployment.listDiagnostics()).toContainEqual(expect.objectContaining({
+      severity: 'error', code: 'password_required',
+      data: expect.objectContaining({ error: expect.objectContaining({ name: 'ApplicationError', code: 'password_required' }) })
+    }));
+  });
+
+  it('redacts the supplied NAS password from native deployment errors and saved logs', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Cloudflare failed while handling sensitive-pass-123')));
+    const deployment = service();
+    const job = await deployment.createDeployment({ config: configuredConfig(), password: 'sensitive-pass-123' });
+    const logs = await deployment.listDiagnostics();
+    expect(job.phase).toBe('failed');
+    expect(JSON.stringify({ job, logs })).not.toContain('sensitive-pass-123');
+    expect(logs).toContainEqual(expect.objectContaining({
+      severity: 'error', data: expect.objectContaining({
+        error: expect.objectContaining({ name: 'Error', message: 'Cloudflare failed while handling [REDACTED]' })
+      })
+    }));
+  });
+
+  it('persists successful deployment progress once while retaining every health check attempt', async () => {
+    const namespace = fakeKv();
+    const target = { accountId: 'account-id', accountName: 'Test Account', workerName: 'uglink-test' };
+    const sessionId = 'test-session';
+    let checkCount = 0;
+    const deployment = createDeploymentService({
+      target,
+      provider: {
+        async assertWorkerOwnership() {},
+        async hasWorkerPassword() { return true; },
+        async ensureKvNamespace() { return { id: 'namespace-id', title: 'namespace-title' }; },
+        async uploadWorker() { return { deploymentId: 'deployment-id' }; },
+        async saveConfiguration() {},
+        async updatePassword() {},
+        async reconcileDomains() {},
+        async updateSubdomain() {},
+        async latestDeployment() { return { id: 'deployment-id', createdAt: new Date().toISOString(), source: 'api' }; },
+        dashboardUrl() { return 'https://dash.cloudflare.com/'; }
+      },
+      jobs: createKvDeploymentJobRepository(namespace, sessionId),
+      diagnostics: createKvDiagnosticLogRepository(namespace, sessionId, target),
+      configuration: createKvConfigurationRepository(namespace, target),
+      health: {
+        async check(services) {
+          checkCount += 1;
+          for (const item of services) {
+            item.healthy = checkCount > 2;
+            item.code = item.healthy ? 'healthy' : 'service_entry_unreachable';
+            item.detail = item.healthy ? 'Worker 入口可用' : 'fetch failed';
+          }
+        }
+      },
+      tokens: { create: randomToken }
+    });
+    const job = await deployment.createDeployment({ config: configuredConfig() });
+    await deployment.refreshDeployment(job.id);
+    await deployment.refreshDeployment(job.id);
+    const logs = await deployment.listDiagnostics();
+    const progress = logs.filter((entry) => entry.source === 'deployment');
+    expect(progress.map((entry) => entry.summary)).toEqual(expect.arrayContaining([
+      '发布请求已创建', '配置检查完成', '准备会话缓存', '发布服务', '配置访问域名', '检查服务状态', 'Worker 入口正常'
+    ]));
+    expect(new Set(progress.map((entry) => entry.id)).size).toBe(progress.length);
+    expect(progress.filter((entry) => entry.detail === '会话缓存已就绪。')).toHaveLength(1);
+    expect(logs.filter((entry) => entry.source === 'health_check')).toHaveLength(3);
+    expect(logs.filter((entry) => entry.source === 'health_check' && entry.severity === 'info')).toHaveLength(1);
   });
 
   it('does not overwrite an unrelated Worker with the same name', async () => {

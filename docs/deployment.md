@@ -166,11 +166,22 @@ environment:
 
 更新控制台不会自动更新已经部署的 Gateway。涉及网关变更时，请按照 [Release 说明](https://github.com/Leonis-Q-F/uglink-worker-nas/releases)，在更新后的控制台进入「故障诊断 → 覆盖部署」。该操作使用已发布配置更新项目管理的同名 Worker，保留现有 NAS 密码，无需修改服务配置来启用发布按钮。
 
+## 查看运行日志
+
+进入「故障诊断」默认查看 **UGLINK 控制台自身的容器运行日志**。页面直接显示控制台进程的标准输出和标准错误，包括启动、退出、Node.js 警告与异常堆栈，脱敏后保留输出文本与换行，超长记录会截断或省略。`stderr` 表示输出通道，其中也可能是普通警告，页面不会仅凭该通道断定容器故障。可搜索、暂停、跟随最新输出，复制或下载当前可见日志。
+
+- 容器日志保存在 `/data/logs`，单个文件最多约 2 MiB，轮转保留两份；页面回放最近 1,000 条记录并继续接收新输出。暂停后恢复或刷新页面会重新读取保留的记录，超过保留范围的日志无法补齐。保留 `uglink-data` 数据卷即可在重建容器后继续查看历史，升级前的旧日志不会自动导入。
+- 日志采集直接接入控制台进程，无需挂载 Docker socket。它不包含其他容器、Docker 守护进程的事件或完整的 OOM/退出码记录。控制台停止后无法通过自身网页查看日志；此时请使用 NAS 的 Docker 日志页面或 `docker logs uglink-console-1`。部署在 Cloudflare 上的控制台没有本地容器日志，会明确提示该来源不可用。
+- 切换到「Worker 网络日志」后，才会使用当前 Cloudflare 连接建立实时 Tail，显示请求执行、认证阶段、代理事件和异常的原始输出。API Token 保留在服务端。Worker 日志从连接建立后开始接收，不回放连接前的记录；暂停、离开页面或连接中断期间的日志不会自动补齐。页面最多保留 1,000 条记录。
+- 「检查与部署记录」保留最近 100 条检查与部署记录，正常检查和每次失败都会分别记录。可展开原始 JSON，按级别、域名筛选。旧版本已经合并的历史记录仍保留原有次数，无法恢复为逐次日志。
+- 「重新检查」请求 Worker 的健康入口，记录 HTTP 状态、耗时、响应和异常信息；该检查只确认 Worker 入口与域名配置，不执行 NAS 登录或验证代理链路。排查认证、代理故障时，切换到 Worker 网络日志，保持实时连接，再访问对应服务复现问题。
+- 若 Worker 实时连接返回 Cloudflare 权限错误，查看原始响应，并核对 Token 是否允许读取目标 Worker 的 Tail；该错误不会断开现有控制台连接。按前文创建的 `Workers Scripts: Edit` Token 可用于 [Worker Tail API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/tail/methods/create/)，无需为此额外扩大账户权限。网页和保存的日志会移除凭据、Cookie、URL 查询参数等敏感内容，进程原有的标准输出和标准错误继续正常送往 Docker。
+
 ## 数据持久化与备份
 
 ### 备份范围与注意事项
 
-- Docker 的 `uglink-data` 卷挂载到容器的 `/data`，不在 NAS 项目的存放路径下。卷内的 `console.sqlite` 保存控制台数据，包括加密会话、服务配置、草稿与诊断记录；自动生成的会话密钥保存在隐藏文件 `.dev.vars` 中。SQLite 的 `console.sqlite-wal`、`console.sqlite-shm`（若存在）以及旧版 `wrangler` 目录也要一起备份，不能只复制数据库主文件。
+- Docker 的 `uglink-data` 卷挂载到容器的 `/data`，不在 NAS 项目的存放路径下。卷内的 `console.sqlite` 保存控制台数据，包括加密会话、服务配置、草稿与诊断记录；自动生成的会话密钥保存在隐藏文件 `.dev.vars` 中，容器运行日志保存在 `logs` 目录中。SQLite 的 `console.sqlite-wal`、`console.sqlite-shm`（若存在）以及旧版 `wrangler` 目录也要一起备份，不能只复制数据库主文件。
 - **完整卷备份前先停止所有使用该卷的控制台，确认没有写入，再备份整个卷，包括隐藏文件。** 更新或重建容器时保留数据卷，不要执行 `docker compose down --volumes`，也不要在 NAS 界面删除数据卷。
 - 如果通过环境变量自行提供 `SESSION_ENCRYPTION_KEY`，它不一定在卷内；需另外安全保存原密钥，并在恢复时注入同一密钥。项目的 Compose YAML、`.env`（若使用）和原镜像版本也应另外保存；不要把这些敏感文件提交到仓库。
 - 卷归档只是压缩文件，**没有加密**，而且可能同时包含加密 API Token 和解密密钥。应限制访问权限，保存在受保护、最好加密的存储中，并另留一份异机副本。应用导出的加密备份及其密码也需妥善保管，不要上传到 Issue 或公开分享。

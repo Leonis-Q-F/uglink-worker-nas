@@ -19,7 +19,7 @@ export type DeploymentMode = 'publish' | 'overwrite';
 
 export type DiagnosticSource = 'health_check' | 'deployment';
 
-export type DiagnosticSeverity = 'error' | 'warning';
+export type DiagnosticSeverity = 'debug' | 'info' | 'error' | 'warning';
 
 export type DiagnosticStage =
   | 'service_entry'
@@ -30,7 +30,8 @@ export type DiagnosticStage =
   | 'worker_upload'
   | 'credential'
   | 'domain_routing'
-  | 'service_check';
+  | 'service_check'
+  | 'worker_runtime';
 
 export interface ServiceHealth {
   serviceName?: string;
@@ -41,6 +42,7 @@ export interface ServiceHealth {
   code?: string;
   stage?: DiagnosticStage;
   httpStatus?: number;
+  data?: unknown;
 }
 
 export interface ServiceHealthResponse {
@@ -70,6 +72,7 @@ export interface DeploymentJob {
     code: string;
     summary: string;
     detail?: string;
+    data?: unknown;
   };
   timeline: Array<{
     phase: DeploymentPhase;
@@ -88,6 +91,7 @@ export interface DiagnosticEntry {
   summary: string;
   detail?: string;
   httpStatus?: number;
+  data?: unknown;
   firstObservedAt: string;
   lastObservedAt: string;
   occurrences: number;

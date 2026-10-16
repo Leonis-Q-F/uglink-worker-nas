@@ -47,7 +47,7 @@ function entry(id: string, observedAt: string): DiagnosticEntry {
 }
 
 describe('diagnostic log repository', () => {
-  it('deduplicates repeated failures and isolates records by Worker target', async () => {
+  it('keeps repeated failures as separate events and isolates records by Worker target', async () => {
     const namespace = fakeKv();
     const sessionId = 'test-session-id-that-is-long-enough-for-storage';
     const repository = createKvDiagnosticLogRepository(namespace, sessionId, target('worker-a'));
@@ -59,13 +59,45 @@ describe('diagnostic log repository', () => {
 
     expect(await repository.list()).toEqual([expect.objectContaining({
       id: 'latest-id',
-      firstObservedAt,
+      firstObservedAt: lastObservedAt,
       lastObservedAt,
-      occurrences: 2,
+      occurrences: 1,
       code: 'service_entry_timeout'
-    })]);
+    }), expect.objectContaining({ id: 'first-id', firstObservedAt, occurrences: 1 })]);
 
     const otherWorker = createKvDiagnosticLogRepository(namespace, sessionId, target('worker-b'));
     expect(await otherWorker.list()).toEqual([]);
+  });
+
+  it('ignores a retry of the same event id without changing historical aggregation counts', async () => {
+    const repository = createKvDiagnosticLogRepository(fakeKv(), 'session', target('worker-a'));
+    const historical = { ...entry('historical', '2026-08-04T00:00:00.000Z'), occurrences: 7 };
+    await repository.replace([historical]);
+    const fresh = entry('fresh', '2026-08-04T00:05:00.000Z');
+    await repository.append([fresh]);
+    await repository.append([fresh]);
+    expect(await repository.list()).toEqual([fresh, historical]);
+  });
+
+  it('retains the newest 100 events in a batch in time order', async () => {
+    const repository = createKvDiagnosticLogRepository(fakeKv(), 'session', target('worker-a'));
+    await repository.append(Array.from({ length: 105 }, (_, index) => entry(
+      `event-${index}`, new Date(Date.UTC(2026, 7, 4, 0, index)).toISOString()
+    )));
+    const entries = await repository.list(100);
+    expect(entries).toHaveLength(100);
+    expect(entries[0]?.id).toBe('event-104');
+    expect(entries.at(-1)?.id).toBe('event-5');
+  });
+
+  it('preserves concurrent appends within the console process', async () => {
+    const namespace = fakeKv();
+    const first = createKvDiagnosticLogRepository(namespace, 'session', target('worker-a'));
+    const second = createKvDiagnosticLogRepository(namespace, 'session', target('worker-a'));
+    await Promise.all([
+      first.append([entry('first', '2026-08-04T00:00:00.000Z')]),
+      second.append([entry('second', '2026-08-04T00:05:00.000Z')])
+    ]);
+    expect((await first.list()).map((item) => item.id)).toEqual(['second', 'first']);
   });
 });

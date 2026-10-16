@@ -33,6 +33,8 @@ npm run docker:up
 
 调试生产 Node.js 入口可先运行 `npm run build:console`，再以 `UGLINK_DATA_DIR=./data PORT=5173 npm run start:console` 启动。它使用 SQLite；`npm run dev` 仍使用 Wrangler 的本地开发环境。不要将测试进程指向正在使用的数据卷。
 
+验证控制台自身的进程日志请使用 Docker 或上述生产 Node.js 入口；Wrangler 开发环境不提供「容器运行日志」来源，可使用 Worker 网络日志及检查与部署记录。
+
 ## 验证
 
 ```bash

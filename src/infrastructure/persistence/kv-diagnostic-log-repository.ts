@@ -2,6 +2,7 @@ import type { ConsoleStore } from '../../application/console/ports';
 import type { DiagnosticLogRepository } from '../../application/console/ports';
 import type { DiagnosticEntry } from '../../domain/deployment/model';
 import type { WorkerTarget } from '../../domain/deployment/model';
+import { redactDiagnostic } from '../../domain/logging/redact-records';
 
 const DIAGNOSTIC_TTL_SECONDS = 60 * 60 * 24 * 30;
 const MAX_DIAGNOSTICS = 100;
@@ -11,15 +12,9 @@ interface DiagnosticStore {
   entries: DiagnosticEntry[];
 }
 
-function fingerprint(entry: DiagnosticEntry): string {
-  return [
-    entry.source,
-    entry.stage,
-    entry.code,
-    entry.service?.hostname || '',
-    entry.deployment?.jobId || ''
-  ].join(':');
-}
+// Keep read/modify/write operations from overlapping within one console process.
+// Remote Workers KV still cannot provide cross-isolate transactional appends.
+const writes = new WeakMap<ConsoleStore, Map<string, Promise<void>>>();
 
 function isDiagnosticEntry(value: unknown): value is DiagnosticEntry {
   if (!value || typeof value !== 'object') return false;
@@ -35,9 +30,25 @@ function isDiagnosticEntry(value: unknown): value is DiagnosticEntry {
 export function createKvDiagnosticLogRepository(
   namespace: ConsoleStore,
   sessionId: string,
-  target: Pick<WorkerTarget, 'accountId' | 'workerName'>
+  target: Pick<WorkerTarget, 'accountId' | 'workerName'>,
+  secrets: readonly string[] = []
 ): DiagnosticLogRepository {
   const key = `diagnostics:${sessionId}:${target.accountId}:${target.workerName}`;
+
+  async function write(operation: () => Promise<void>): Promise<void> {
+    let pending = writes.get(namespace);
+    if (!pending) {
+      pending = new Map();
+      writes.set(namespace, pending);
+    }
+    const next = (pending.get(key) || Promise.resolve()).catch(() => undefined).then(operation);
+    pending.set(key, next);
+    try {
+      await next;
+    } finally {
+      if (pending.get(key) === next) pending.delete(key);
+    }
+  }
 
   async function readEntries(): Promise<DiagnosticEntry[]> {
     const stored = await namespace.get<DiagnosticStore>(key, 'json');
@@ -48,27 +59,21 @@ export function createKvDiagnosticLogRepository(
   return {
     async append(entries: DiagnosticEntry[]): Promise<void> {
       if (entries.length === 0) return;
-      const combined = await readEntries();
-      for (const entry of entries) {
-        const entryFingerprint = fingerprint(entry);
-        const existingIndex = combined.findIndex((candidate) => fingerprint(candidate) === entryFingerprint);
-        if (existingIndex >= 0) {
-          const previous = combined[existingIndex]!;
-          combined.splice(existingIndex, 1);
-          combined.unshift({
-            ...entry,
-            firstObservedAt: previous.firstObservedAt,
-            occurrences: previous.occurrences + 1
-          });
-        } else {
+      await write(async () => {
+        const combined = await readEntries();
+        const ids = new Set(combined.map((entry) => entry.id));
+        for (const entry of entries) {
+          if (ids.has(entry.id)) continue;
+          ids.add(entry.id);
           combined.unshift(entry);
         }
-      }
-      await namespace.put(key, JSON.stringify({
-        version: 1,
-        entries: combined.slice(0, MAX_DIAGNOSTICS)
-      } satisfies DiagnosticStore), {
-        expirationTtl: DIAGNOSTIC_TTL_SECONDS
+        combined.sort((left, right) => Date.parse(right.lastObservedAt) - Date.parse(left.lastObservedAt));
+        await namespace.put(key, JSON.stringify({
+          version: 1,
+          entries: combined.slice(0, MAX_DIAGNOSTICS).map((entry) => redactDiagnostic(entry, secrets))
+        } satisfies DiagnosticStore), {
+          expirationTtl: DIAGNOSTIC_TTL_SECONDS
+        });
       });
     },
     async list(limit = 50): Promise<DiagnosticEntry[]> {
@@ -78,12 +83,15 @@ export function createKvDiagnosticLogRepository(
     async replace(entries: DiagnosticEntry[]): Promise<void> {
       const normalized = entries
         .filter(isDiagnosticEntry)
-        .slice(0, MAX_DIAGNOSTICS);
-      await namespace.put(key, JSON.stringify({
-        version: 1,
-        entries: normalized
-      } satisfies DiagnosticStore), {
-        expirationTtl: DIAGNOSTIC_TTL_SECONDS
+        .slice(0, MAX_DIAGNOSTICS)
+        .map((entry) => redactDiagnostic(entry, secrets));
+      await write(async () => {
+        await namespace.put(key, JSON.stringify({
+          version: 1,
+          entries: normalized
+        } satisfies DiagnosticStore), {
+          expirationTtl: DIAGNOSTIC_TTL_SECONDS
+        });
       });
     }
   };

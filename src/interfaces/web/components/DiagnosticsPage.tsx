@@ -1,27 +1,22 @@
 import {
-  AlertCircle,
-  CheckCircle2,
-  Circle,
-  Cloud,
-  LoaderCircle,
-  RefreshCw,
-  Rocket,
-  ServerCog,
-  TriangleAlert
+  Check, ChevronRight, Copy, Download, LoaderCircle, Pause, Play, RefreshCw, Rocket, Search, X
 } from 'lucide-react';
-import { useMemo } from 'react';
-import type {
-  DeploymentJob,
-  DiagnosticEntry,
-  DiagnosticStage,
-  ServiceHealthResponse
-} from '../../../domain/deployment/model';
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import type { DeploymentJob, DiagnosticEntry, ServiceHealthResponse } from '../../../domain/deployment/model';
+import { useRuntimeLogs } from '../hooks/use-runtime-logs';
+import type { LogSource } from '../hooks/use-runtime-logs';
+import {
+  consoleLogEntries, filterLogEntries, formatLogExport, formatLogTextExport, LOG_BUFFER_LIMIT, mergeLogEntries
+} from '../lib/log-viewer';
+import type { LogFilters, ViewerLogEntry } from '../lib/log-viewer';
 
 interface DiagnosticsPageProps {
   entries: DiagnosticEntry[];
   health?: ServiceHealthResponse;
   healthError?: string;
+  diagnosticsError?: string;
   focusedHostname?: string;
+  csrfToken?: string;
   loading: boolean;
   checking: boolean;
   deploying: boolean;
@@ -30,224 +25,258 @@ interface DiagnosticsPageProps {
   onClearFocus: () => void;
   onCheck: () => void;
   onRedeploy: () => void;
+  onRefresh?: () => void | Promise<void>;
 }
 
-const STAGE_LABELS: Record<DiagnosticStage, string> = {
-  service_entry: '服务入口',
-  worker_configuration: 'Worker 配置',
-  configuration: '配置检查',
-  cloudflare_access: 'Cloudflare 授权',
-  session_cache: '会话缓存',
-  worker_upload: 'Worker 发布',
-  credential: '登录凭据',
-  domain_routing: '域名路由',
-  service_check: '服务检查'
+const LEVEL_NAMES = { debug: 'DEBUG', info: 'INFO', warning: 'WARN', error: 'ERROR' };
+const CONNECTION_NAMES = {
+  connecting: '正在连接', connected: '实时连接', paused: '已暂停', error: '等待重连', unavailable: '不可用'
 };
+const TIME_FORMAT = new Intl.DateTimeFormat('zh-CN', {
+  hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3, hour12: false
+});
 
-function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  }).format(new Date(value));
-}
+const LogRow = memo(function LogRow({ entry }: { entry: ViewerLogEntry }) {
+  const date = new Date(entry.timestamp);
+  const validDate = Number.isFinite(date.getTime());
+  const time = <time dateTime={validDate ? date.toISOString() : undefined} title={validDate ? date.toLocaleString('zh-CN') : '时间不可用'}>
+    {validDate ? TIME_FORMAT.format(date) : '—'}
+  </time>;
 
-function stageLabel(stage?: DiagnosticStage): string {
-  return stage ? STAGE_LABELS[stage] : '服务检查';
-}
+  if (entry.source === 'container') {
+    return (
+      <div className="runtime-log-row runtime-log-row--container" data-testid="log-row" data-source="container" data-stream={entry.stream}>
+        <span className="runtime-log-meta">{time}<span className="runtime-log-channel">{entry.stream || 'process'}</span></span>
+        <pre className="runtime-log-message">{entry.message}</pre>
+      </div>
+    );
+  }
 
-function matchesHostname(entry: DiagnosticEntry, hostname?: string): boolean {
-  return Boolean(hostname && entry.service?.hostname.toLowerCase() === hostname.toLowerCase());
-}
+  return (
+    <details className="runtime-log-row" data-testid="log-row" data-level={entry.level} data-source={entry.source}>
+      <summary className="runtime-log-line">
+        <span className="runtime-log-meta">{time}<span className={`runtime-log-level runtime-log-level--${entry.level}`}>{LEVEL_NAMES[entry.level]}</span></span>
+        <span className="runtime-log-message">{entry.message}{entry.occurrences && entry.occurrences > 1
+          ? <span className="runtime-log-occurrences" title="此旧记录在历史存储中已合并，无法还原每次事件的时间">〔历史合并 {entry.occurrences} 次〕</span> : null}</span>
+        <ChevronRight className="runtime-log-row__chevron" size={14} aria-hidden="true" />
+      </summary>
+      <div className="runtime-log-detail"><pre>{JSON.stringify(entry.data ?? entry, null, 2)}</pre></div>
+    </details>
+  );
+});
 
 export function DiagnosticsPage({
-  entries,
-  health,
-  healthError,
-  focusedHostname,
-  loading,
-  checking,
-  deploying,
-  canCheck,
-  job,
-  onClearFocus,
-  onCheck,
-  onRedeploy
+  entries, healthError, diagnosticsError, focusedHostname, csrfToken, loading, checking,
+  deploying, canCheck, job, onClearFocus, onCheck, onRedeploy, onRefresh
 }: DiagnosticsPageProps) {
-  const failures = useMemo(() => (
-    (health?.services || [])
-      .filter((service) => !service.healthy)
-      .sort((left, right) => {
-        const leftFocused = left.hostname.toLowerCase() === focusedHostname?.toLowerCase();
-        const rightFocused = right.hostname.toLowerCase() === focusedHostname?.toLowerCase();
-        return Number(rightFocused) - Number(leftFocused);
-      })
-  ), [focusedHostname, health]);
-  const orderedEntries = useMemo(() => [...entries].sort((left, right) => {
-    const focusDifference = Number(matchesHostname(right, focusedHostname))
-      - Number(matchesHostname(left, focusedHostname));
-    if (focusDifference !== 0) return focusDifference;
-    return Date.parse(right.lastObservedAt) - Date.parse(left.lastObservedAt);
-  }), [entries, focusedHostname]);
-  const isOverwriteJob = job?.mode === 'overwrite';
-  const overwriteFailed = isOverwriteJob && job.phase === 'failed';
-  const overwriteComplete = isOverwriteJob && job.phase === 'healthy';
+  const [source, setSource] = useState<LogSource>('container');
+  const [pausedEntries, setPausedEntries] = useState<ViewerLogEntry[] | null>(null);
+  const paused = pausedEntries !== null;
+  const { entries: runtimeEntries, connection } = useRuntimeLogs(csrfToken, paused, source);
+  const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search);
+  const [level, setLevel] = useState<LogFilters['level']>('');
+  const [hostname, setHostname] = useState('');
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [copyState, setCopyState] = useState('');
+  const [requestErrors, setRequestErrors] = useState<ViewerLogEntry[]>([]);
+  const [gapNotices, setGapNotices] = useState<ViewerLogEntry[]>([]);
+  const lastErrors = useRef({ health: '', diagnostics: '' });
+  const viewport = useRef<HTMLDivElement>(null);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const refreshInFlight = useRef<Promise<void> | null>(null);
+  const activeHostname = source === 'container' ? '' : focusedHostname || hostname;
+
+  const refreshConsole = useCallback(async () => {
+    if (!onRefresh) return;
+    if (refreshInFlight.current) { await refreshInFlight.current; return; }
+    const operation = Promise.resolve().then(onRefresh).catch(() => {
+      // The caller exposes load errors through diagnosticsError.
+    });
+    refreshInFlight.current = operation;
+    try { await operation; } finally {
+      if (refreshInFlight.current === operation) refreshInFlight.current = null;
+    }
+  }, [onRefresh]);
+
+  useEffect(() => {
+    const receivedAt = Date.now();
+    const additions: ViewerLogEntry[] = [];
+    for (const [operation, message] of [['health', healthError], ['diagnostics', diagnosticsError]] as const) {
+      if (message && message !== lastErrors.current[operation]) additions.push({
+        id: `request:${operation}:${receivedAt}`, timestamp: receivedAt, level: 'error', source: 'console',
+        message, data: { operation: operation === 'health' ? 'health_check_request' : 'diagnostics_load', receivedAt }
+      });
+      lastErrors.current[operation] = message || '';
+    }
+    if (additions.length) setRequestErrors((current) => mergeLogEntries([...current, ...additions], 100));
+  }, [diagnosticsError, healthError]);
+
+  useEffect(() => {
+    if (source !== 'console' || paused || !onRefresh) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      await refreshConsole();
+      if (!cancelled) timer = setTimeout(() => { void refresh(); }, 4_000);
+    };
+    void refresh();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [onRefresh, paused, refreshConsole, source]);
+
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
+
+  const consoleEntries = useMemo(() => consoleLogEntries(entries, job), [entries, job]);
+  const liveEntries = useMemo(() => source === 'console'
+    ? mergeLogEntries([...consoleEntries, ...requestErrors])
+    : source === 'worker' ? mergeLogEntries([...runtimeEntries, ...gapNotices]) : runtimeEntries,
+  [consoleEntries, gapNotices, requestErrors, runtimeEntries, source]);
+  const displayedEntries = pausedEntries ?? liveEntries;
+  const filteredEntries = useMemo(() => filterLogEntries(displayedEntries, {
+    search: deferredSearch, level: source === 'container' ? '' : level, hostname: activeHostname
+  }), [activeHostname, deferredSearch, displayedEntries, level, source]);
+  const hostnames = useMemo(() => [...new Set([
+    ...displayedEntries.flatMap((entry) => entry.hostname ? [entry.hostname.toLowerCase()] : []),
+    ...(activeHostname ? [activeHostname.toLowerCase()] : [])
+  ])].sort(), [activeHostname, displayedEntries]);
+  const hasFilters = Boolean(search || (source !== 'container' && (level || activeHostname)));
+  const isLoading = source === 'console' ? loading : connection.state === 'connecting' && !displayedEntries.length;
+  const exportDescription = source === 'container' ? '纯文本 .log' : 'JSON Lines .jsonl';
+
+  useEffect(() => {
+    if (autoScroll && viewport.current) viewport.current.scrollTop = viewport.current.scrollHeight;
+  }, [autoScroll, filteredEntries]);
+
+  function togglePaused() {
+    if (!paused) {
+      setPausedEntries(liveEntries);
+      return;
+    }
+    if (source === 'worker') {
+      const timestamp = Date.now();
+      setGapNotices((current) => mergeLogEntries([...current, {
+        id: `resume:${timestamp}`, timestamp, level: 'info', source: 'console',
+        message: '已恢复 Worker 网络日志；暂停期间的输出不会补收。',
+        data: { operation: 'runtime_log_resume', gapsPossible: true }
+      }], 100));
+    }
+    setPausedEntries(null);
+  }
+
+  function clearFilters() {
+    setSearch(''); setLevel(''); setHostname(''); onClearFocus();
+  }
+
+  function changeSource(nextSource: LogSource) {
+    setPausedEntries(null);
+    setCopyState('');
+    clearFilters();
+    setSource(nextSource);
+  }
+
+  function logExport() {
+    return source === 'container' ? formatLogTextExport(filteredEntries) : formatLogExport(filteredEntries);
+  }
+
+  async function copyLogs() {
+    try {
+      await navigator.clipboard.writeText(logExport());
+      setCopyState('已复制');
+    } catch { setCopyState('复制失败，请下载日志'); }
+    clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopyState(''), 3_000);
+  }
+
+  function downloadLogs() {
+    const isContainer = source === 'container';
+    const url = URL.createObjectURL(new Blob([logExport()], {
+      type: isContainer ? 'text/plain;charset=utf-8' : 'application/x-ndjson;charset=utf-8'
+    }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `uglink-${source}-${new Date().toISOString().replace(/[:.]/g, '-')}.${isContainer ? 'log' : 'jsonl'}`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  let notice: string;
+  if (paused) notice = source === 'container' ? '已暂停接收 · 恢复后回放最近保存的输出'
+    : source === 'worker' ? '已暂停接收 · 暂停期间的 Worker 输出不会补收' : '已暂停记录刷新';
+  else if (connection.state === 'error' || connection.state === 'unavailable') notice = connection.message;
+  else notice = source === 'container' ? '回放最近保存的输出，并持续接收 stdout / stderr'
+    : source === 'worker' ? '从连接后开始接收 · 断线或暂停期间的 Worker 输出不会补收'
+      : '服务检查与部署历史 · 每 4 秒刷新';
 
   return (
     <div className="section-page diagnostics-page" data-testid="diagnostics-page">
       <div className="page-heading diagnostics-heading">
-        <div>
-          <p className="eyebrow">运行诊断</p>
-          <h1>故障诊断</h1>
-          <p>查看服务检查与部署阶段的具体错误，并使用已发布配置重新检查或覆盖部署。</p>
-        </div>
+        <div><h1>故障诊断</h1><p>查看 UGLINK 控制台的容器运行输出与历史记录</p></div>
         <div className="diagnostics-actions">
-          <button
-            className="button button--secondary"
-            type="button"
-            onClick={onCheck}
-            disabled={!canCheck || checking || deploying}
-          >
-            {checking ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}
-            {checking ? '正在检查' : '重新检查'}
+          <button className="button button--secondary" type="button" onClick={() => { changeSource('console'); onCheck(); }} disabled={!canCheck || checking || deploying}>
+            {checking ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}{checking ? '正在检查' : '重新检查'}
           </button>
-          <button
-            className="button button--primary"
-            type="button"
-            onClick={onRedeploy}
-            disabled={!canCheck || checking || deploying}
-            title="使用当前已发布配置覆盖现有受管 Worker"
-          >
-            {deploying ? <LoaderCircle className="spin" size={16} /> : <Rocket size={16} />}
-            {deploying ? '正在覆盖' : '覆盖部署'}
+          <button className="button button--secondary" type="button" onClick={() => { changeSource('console'); onRedeploy(); }} disabled={!canCheck || checking || deploying}
+            title="使用当前已发布配置覆盖现有受管 Worker">
+            {deploying ? <LoaderCircle className="spin" size={15} /> : <Rocket size={15} />}{deploying ? '正在覆盖' : '覆盖部署'}
           </button>
         </div>
       </div>
 
-      {focusedHostname && (
-        <div className="diagnostics-focus" role="status">
-          <Cloud size={16} />
-          <span>正在优先显示 <strong>{focusedHostname}</strong> 的故障信息</span>
-          <button type="button" onClick={onClearFocus}>查看全部</button>
-        </div>
-      )}
-
-      {isOverwriteJob && !overwriteComplete && (
-        <div className={`diagnostics-deployment${overwriteFailed ? ' is-error' : ''}`}>
-          {overwriteFailed
-            ? <AlertCircle size={19} />
-            : <LoaderCircle className="spin" size={19} />}
-          <div>
-            <strong>{overwriteFailed ? '覆盖部署失败' : '覆盖部署进行中'}</strong>
-            <p>{job.message}</p>
+      <section className="runtime-log-console" data-testid="log-viewer" data-source={source} aria-labelledby="runtime-log-title">
+        <div className="runtime-log-toolbar">
+          <div className="runtime-log-title"><h2 id="runtime-log-title">日志查看器</h2>
+            <span className={`runtime-log-connection runtime-log-connection--${connection.state}`} title={connection.message}>
+              <span aria-hidden="true" />{source === 'console' && connection.state === 'connected' ? '自动刷新' : CONNECTION_NAMES[connection.state]}
+            </span>
           </div>
-          <span>{formatDateTime(job.updatedAt)}</span>
-        </div>
-      )}
-
-      <section className="panel diagnostics-current" aria-labelledby="current-diagnostics-title">
-        <div className="panel__heading panel__heading--row">
-          <div>
-            <p className="eyebrow">当前状态</p>
-            <h2 id="current-diagnostics-title">服务检查结果</h2>
-            <p>检查 Worker 服务入口是否可访问，以及域名是否已经绑定到当前服务。</p>
+          <div className="runtime-log-tools">
+            <button type="button" onClick={togglePaused} aria-pressed={paused}>{paused ? <Play size={14} /> : <Pause size={14} />}{paused ? '恢复' : '暂停'}</button>
+            <button type="button" onClick={() => { void copyLogs(); }} disabled={!filteredEntries.length} title={`复制当前筛选结果（${exportDescription}）`}>
+              {copyState === '已复制' ? <Check size={14} /> : <Copy size={14} />}复制
+            </button>
+            <button type="button" onClick={downloadLogs} disabled={!filteredEntries.length} title={`下载当前筛选结果（${exportDescription}）`}><Download size={14} />下载</button>
           </div>
-          {health?.checkedAt && <span className="diagnostics-checked">检查于 {formatDateTime(health.checkedAt)}</span>}
         </div>
 
-        {healthError && (
-          <div className="diagnostics-request-error" role="alert">
-            <AlertCircle size={18} />
-            <div><strong>检查请求失败</strong><p>{healthError}</p></div>
-          </div>
-        )}
+        <div className={`runtime-log-filters${source === 'container' ? ' runtime-log-filters--container' : ''}`}>
+          <select aria-label="日志来源" value={source} onChange={(event) => changeSource(event.target.value as LogSource)}>
+            <option value="container">容器运行日志</option><option value="worker">Worker 网络日志</option><option value="console">检查与部署记录</option>
+          </select>
+          <label className="runtime-log-search"><Search size={17} aria-hidden="true" />
+            <input aria-label="搜索日志" type="search" placeholder={source === 'container' ? '搜索运行输出…' : '搜索日志内容、域名或 JSON…'} value={search} onChange={(event) => setSearch(event.target.value)} />
+          </label>
+          {source !== 'container' ? <>
+            <select aria-label="日志级别" value={level} onChange={(event) => setLevel(event.target.value as LogFilters['level'])}>
+              <option value="">全部级别</option><option value="debug">DEBUG</option><option value="info">INFO</option><option value="warning">WARN</option><option value="error">ERROR</option>
+            </select>
+            <select aria-label="日志域名" value={activeHostname.toLowerCase()} onChange={(event) => { onClearFocus(); setHostname(event.target.value); }}>
+              <option value="">全部域名</option>{hostnames.map((host) => <option key={host} value={host}>{host}</option>)}
+            </select>
+          </> : null}
+          <button className="runtime-log-clear" type="button" onClick={clearFilters} disabled={!hasFilters}><X size={13} />清除筛选</button>
+        </div>
 
-        {checking ? (
-          <div className="diagnostics-empty"><LoaderCircle className="spin" size={24} /><strong>正在检查服务入口与 NAS 后端</strong><p>检查结果会在完成后自动更新。</p></div>
-        ) : failures.length > 0 ? (
-          <div className="diagnostics-failure-list">
-            {failures.map((failure) => (
-              <article
-                className={`diagnostics-failure${failure.hostname.toLowerCase() === focusedHostname?.toLowerCase() ? ' is-focused' : ''}`}
-                key={failure.hostname}
-              >
-                <span className="diagnostics-failure__icon"><AlertCircle size={18} /></span>
-                <div className="diagnostics-failure__body">
-                  <div className="diagnostics-failure__title">
-                    <strong>{failure.serviceName || failure.hostname}</strong>
-                    <span>{stageLabel(failure.stage)}</span>
-                  </div>
-                  <p>{failure.detail}</p>
-                  <div className="diagnostics-meta">
-                    <code>{failure.code || 'health_check_failed'}</code>
-                    {failure.httpStatus !== undefined && <span>HTTP {failure.httpStatus}</span>}
-                    <span>{failure.hostname}</span>
-                    {failure.port !== undefined && <span>NAS :{failure.port}</span>}
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : health && !healthError ? (
-          <div className="diagnostics-empty diagnostics-empty--success"><CheckCircle2 size={26} /><strong>Worker 入口配置正常</strong><p>最近一次检查确认域名已绑定到当前 Worker。</p></div>
-        ) : (
-          <div className="diagnostics-empty"><ServerCog size={26} /><strong>等待服务检查</strong><p>点击“重新检查”获取当前运行状态。</p></div>
-        )}
+        <div className="runtime-log-notice" role="status">
+          <span>{notice} · 最多显示 {LOG_BUFFER_LIMIT.toLocaleString()} 条</span>
+          {copyState ? <span className="runtime-log-feedback">{copyState}</span> : null}
+        </div>
+
+        <div className="runtime-log-viewport" ref={viewport} tabIndex={0} role="region" aria-label="日志内容" aria-busy={isLoading || undefined}>
+          {filteredEntries.length ? filteredEntries.map((entry) => <LogRow key={`${entry.source}:${entry.id}`} entry={entry} />) : (
+            <div className="runtime-log-empty">
+              {isLoading ? <LoaderCircle className="spin" size={21} /> : <span className="runtime-log-empty__prompt" aria-hidden="true">&gt;_</span>}
+              <strong>{isLoading ? '正在读取日志' : hasFilters ? '没有匹配的日志' : connection.state === 'unavailable' ? '当前运行环境无法提供此日志源' : '等待日志输出'}</strong>
+              <p>{hasFilters ? '调整搜索词或清除筛选后查看其他记录。' : connection.state === 'unavailable' ? connection.message
+                : source === 'container' ? '容器启动信息、标准输出和标准错误会连续显示在这里。'
+                  : source === 'worker' ? '建立连接后，Worker 请求与运行输出会显示在这里。' : '服务检查和部署记录会按时间显示在这里。'}</p>
+              {hasFilters ? <button type="button" onClick={clearFilters}>清除筛选</button> : null}
+            </div>
+          )}
+        </div>
+        <div className="runtime-log-footer"><span>显示 {filteredEntries.length.toLocaleString()} / {displayedEntries.length.toLocaleString()} 条</span>
+          <label><span>按时间正序 · 自动滚动</span><input type="checkbox" role="switch" aria-label="自动滚动" checked={autoScroll} onChange={(event) => setAutoScroll(event.target.checked)} /></label>
+        </div>
       </section>
-
-      <section className="panel diagnostics-history" aria-labelledby="diagnostic-history-title">
-        <div className="panel__heading panel__heading--row">
-          <div>
-            <p className="eyebrow">错误日志</p>
-            <h2 id="diagnostic-history-title">诊断记录</h2>
-            <p>仅记录错误阶段与响应结果，不记录 API Token、密码或代理 Cookie。</p>
-          </div>
-          <span className="diagnostics-count">{entries.length} 条</span>
-        </div>
-
-        {loading ? (
-          <div className="diagnostics-empty"><LoaderCircle className="spin" size={24} /><strong>正在读取诊断记录</strong></div>
-        ) : orderedEntries.length === 0 ? (
-          <div className="diagnostics-empty"><CheckCircle2 size={26} /><strong>暂无错误记录</strong><p>新的检查或部署错误会显示在这里。</p></div>
-        ) : (
-          <div className="diagnostics-log-list">
-            {orderedEntries.map((entry) => (
-              <article
-                className={`diagnostics-log${matchesHostname(entry, focusedHostname) ? ' is-focused' : ''}`}
-                key={entry.id}
-              >
-                <span className={`diagnostics-log__marker diagnostics-log__marker--${entry.severity}`}>
-                  {entry.severity === 'warning' ? <TriangleAlert size={17} /> : <AlertCircle size={17} />}
-                </span>
-                <div className="diagnostics-log__body">
-                  <div className="diagnostics-log__title">
-                    <strong>{entry.summary}</strong>
-                    <time>{formatDateTime(entry.lastObservedAt)}</time>
-                  </div>
-                  {entry.detail && <p>{entry.detail}</p>}
-                  <div className="diagnostics-meta">
-                    <span>{entry.source === 'deployment' ? '部署' : '健康检查'}</span>
-                    <span>{stageLabel(entry.stage)}</span>
-                    <code>{entry.code}</code>
-                    {entry.httpStatus !== undefined && <span>HTTP {entry.httpStatus}</span>}
-                    {entry.service && <span>{entry.service.hostname}{entry.service.port ? ` · NAS :${entry.service.port}` : ''}</span>}
-                    {entry.deployment?.mode === 'overwrite' && <span>覆盖部署</span>}
-                    {entry.occurrences > 1 && <span>重复 {entry.occurrences} 次</span>}
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <div className="diagnostics-note">
-        <Circle size={9} fill="currentColor" />
-        <span>覆盖部署会替换当前项目管理的同名 Worker；其他来源的同名 Worker 仍会被保护，不会被覆盖。</span>
-      </div>
     </div>
   );
 }

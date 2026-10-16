@@ -12,6 +12,7 @@ import { resolveUglinkConfig, validateUglinkConfig } from '../../domain/configur
 import { defaultConfig } from '../../domain/configuration/defaults';
 import { servicesRequiringSynchronization } from '../../domain/configuration/change-set';
 import type { UglinkConfig, UglinkService } from '../../domain/configuration/model';
+import { sanitizeLogValue } from '../../domain/logging/sanitize';
 import type {
   DeploymentJob,
   DeploymentMode,
@@ -56,11 +57,8 @@ function advance(job: DeploymentJob, phase: DeploymentPhase, detail: string): vo
   job.updatedAt = now;
   job.message = detail;
   const last = job.timeline.at(-1);
-  if (last?.phase !== phase) {
+  if (last?.phase !== phase || last.detail !== detail) {
     job.timeline.push({ phase, label: timelineLabel(phase), detail, at: now });
-  } else {
-    last.detail = detail;
-    last.at = now;
   }
 }
 
@@ -88,14 +86,19 @@ function failureStage(phase: DeploymentPhase, code: string): DiagnosticStage {
   }
 }
 
-function deploymentFailure(error: unknown, phase: DeploymentPhase): NonNullable<DeploymentJob['failure']> {
+function deploymentFailure(
+  error: unknown,
+  phase: DeploymentPhase,
+  secrets: readonly string[] = []
+): NonNullable<DeploymentJob['failure']> {
   const code = error instanceof ApplicationError ? error.code : 'deployment_failed';
   return {
     phase,
     stage: failureStage(phase, code),
     code,
-    summary: error instanceof Error ? error.message : '发布过程中发生未知错误。',
-    ...(error instanceof ApplicationError && error.detail ? { detail: error.detail } : {})
+    summary: sanitizeLogValue(error instanceof Error ? error.message : '发布过程中发生未知错误。', secrets) as string,
+    ...(error instanceof ApplicationError && error.detail ? { detail: sanitizeLogValue(error.detail, secrets) as string } : {}),
+    data: sanitizeLogValue({ error }, secrets)
   };
 }
 
@@ -123,6 +126,7 @@ function validateDeployRequest(request: DeployRequest): { config: UglinkConfig; 
 
 export function createDeploymentService(dependencies: DeploymentServiceDependencies) {
   const { target, provider, jobs, diagnostics, health, tokens, configuration } = dependencies;
+  const loggedTimelineLengths = new WeakMap<DeploymentJob, number>();
 
   async function appendDiagnostics(entries: DiagnosticEntry[]): Promise<void> {
     if (entries.length === 0) return;
@@ -136,58 +140,59 @@ export function createDeploymentService(dependencies: DeploymentServiceDependenc
     }
   }
 
+  async function saveJob(job: DeploymentJob): Promise<void> {
+    await jobs.save(job);
+    const fromIndex = loggedTimelineLengths.get(job) ?? 0;
+    await appendDiagnostics(job.timeline.slice(fromIndex).map((item, offset) => {
+      const failure = item.phase === 'failed' ? job.failure : undefined;
+      return {
+        id: `${job.id}:timeline:${fromIndex + offset}`,
+        source: 'deployment',
+        severity: failure ? 'error' : 'info',
+        stage: failure?.stage || failureStage(item.phase, ''),
+        code: failure?.code || `deployment_${item.phase}`,
+        summary: failure?.summary || item.label,
+        detail: item.detail,
+        data: failure?.data || { phase: item.phase },
+        firstObservedAt: item.at,
+        lastObservedAt: item.at,
+        occurrences: 1,
+        deployment: { jobId: job.id, phase: failure?.phase || item.phase, mode: job.mode }
+      } satisfies DiagnosticEntry;
+    }));
+    loggedTimelineLengths.set(job, job.timeline.length);
+  }
+
   function serviceDiagnostics(
     services: ServiceHealth[],
     observedAt: string,
     deployment?: DeploymentJob
   ): DiagnosticEntry[] {
-    return services
-      .filter((service) => !service.healthy)
-      .map((service) => ({
-        id: tokens.create(15),
-        source: 'health_check',
-        severity: service.code === 'domain_propagating' ? 'warning' : 'error',
-        stage: service.stage || 'service_entry',
-        code: service.code || 'health_check_failed',
-        summary: service.detail,
-        ...(service.httpStatus !== undefined ? { httpStatus: service.httpStatus } : {}),
-        firstObservedAt: observedAt,
-        lastObservedAt: observedAt,
-        occurrences: 1,
-        service: {
-          ...(service.serviceName ? { name: service.serviceName } : {}),
-          hostname: service.hostname,
-          ...(service.port !== undefined ? { port: service.port } : {})
-        },
-        ...(deployment ? {
-          deployment: {
-            jobId: deployment.id,
-            phase: deployment.phase,
-            mode: deployment.mode
-          }
-        } : {})
-      }));
-  }
-
-  function deploymentDiagnostic(job: DeploymentJob): DiagnosticEntry | undefined {
-    if (!job.failure) return undefined;
-    return {
+    return services.map((service) => ({
       id: tokens.create(15),
-      source: 'deployment',
-      severity: 'error',
-      stage: job.failure.stage,
-      code: job.failure.code,
-      summary: job.failure.summary,
-      ...(job.failure.detail ? { detail: job.failure.detail } : {}),
-      firstObservedAt: job.updatedAt,
-      lastObservedAt: job.updatedAt,
+      source: 'health_check',
+      severity: service.healthy ? 'info' : service.code === 'domain_propagating' ? 'warning' : 'error',
+      stage: service.stage || 'service_entry',
+      code: service.code || (service.healthy ? 'healthy' : 'health_check_failed'),
+      summary: service.detail,
+      ...(service.data !== undefined ? { data: service.data } : {}),
+      ...(service.httpStatus !== undefined ? { httpStatus: service.httpStatus } : {}),
+      firstObservedAt: observedAt,
+      lastObservedAt: observedAt,
       occurrences: 1,
-      deployment: {
-        jobId: job.id,
-        phase: job.failure.phase,
-        mode: job.mode
-      }
-    };
+      service: {
+        ...(service.serviceName ? { name: service.serviceName } : {}),
+        hostname: service.hostname,
+        ...(service.port !== undefined ? { port: service.port } : {})
+      },
+      ...(deployment ? {
+        deployment: {
+          jobId: deployment.id,
+          phase: deployment.phase,
+          mode: deployment.mode
+        }
+      } : {})
+    }));
   }
 
   function newJob(
@@ -252,11 +257,11 @@ export function createDeploymentService(dependencies: DeploymentServiceDependenc
       forceAll: mode === 'overwrite' || request.password !== undefined
     });
     const job = newJob(mode, synchronizedServices);
-    await jobs.save(job);
+    await saveJob(job);
 
     try {
       advance(job, 'validating', 'UGREENlink ID 和服务配置均有效。');
-      await jobs.save(job);
+      await saveJob(job);
       await provider.assertWorkerOwnership(target);
 
       const passwordExists = await provider.hasWorkerPassword(target);
@@ -265,43 +270,45 @@ export function createDeploymentService(dependencies: DeploymentServiceDependenc
       }
 
       advance(job, 'provisioning', '正在准备会话缓存。');
-      await jobs.save(job);
+      await saveJob(job);
       const namespace = await provider.ensureKvNamespace(target);
       job.kvNamespaceTitle = namespace.title;
       job.kvNamespaceIdSuffix = namespace.id.slice(-6);
       advance(job, 'provisioning', '会话缓存已就绪。');
-      await jobs.save(job);
+      await saveJob(job);
 
       advance(job, 'uploading', '正在发布服务配置。');
-      await jobs.save(job);
+      await saveJob(job);
       const upload = await provider.uploadWorker(target, config, namespace);
       await provider.saveConfiguration(target, config, namespace);
       if (upload.deploymentId) job.cloudflareDeploymentId = upload.deploymentId;
       advance(job, 'uploading', '服务已发布。');
-      await jobs.save(job);
+      await saveJob(job);
 
       if (request.password) {
         await provider.updatePassword(target, request.password);
         job.passwordUpdated = true;
         advance(job, 'secret_updated', '登录密码已安全更新。');
-        await jobs.save(job);
+        await saveJob(job);
       }
 
       const desiredHostnames = config.services
         .filter((service) => service.enabled !== false)
         .map((service) => service.hostname);
       advance(job, 'routing', '正在配置自定义访问域名。');
-      await jobs.save(job);
+      await saveJob(job);
       await provider.reconcileDomains(target, desiredHostnames);
       await provider.updateSubdomain(target, false, false);
       advance(job, 'routing', `${desiredHostnames.length} 个访问域名已配置。`);
-      await jobs.save(job);
+      await saveJob(job);
 
       const latest = await provider.latestDeployment(target);
       if (latest) job.cloudflareDeploymentId = latest.id;
       if (job.services.length === 0) {
         advance(job, 'healthy', '配置已发布，没有需要重新检查的服务入口。');
       } else {
+        advance(job, 'checking', '正在检查本次修改涉及的 Worker 服务入口。');
+        await saveJob(job);
         await health.check(job.services);
         await appendDiagnostics(serviceDiagnostics(job.services, new Date().toISOString(), job));
         advance(
@@ -318,19 +325,18 @@ export function createDeploymentService(dependencies: DeploymentServiceDependenc
         updatedAt: new Date().toISOString()
       });
     } catch (error) {
-      job.failure = deploymentFailure(error, job.phase);
+      job.failure = deploymentFailure(error, job.phase, request.password ? [request.password] : []);
       advance(job, 'failed', failureMessage(job.failure));
     }
 
-    await jobs.save(job);
-    const diagnostic = deploymentDiagnostic(job);
-    if (diagnostic) await appendDiagnostics([diagnostic]);
+    await saveJob(job);
     return job;
   }
 
   async function refreshDeployment(id: string): Promise<DeploymentJob> {
     const job = await jobs.read(id);
     if (!job) throw new ApplicationError(404, 'deployment_not_found', '找不到这次部署记录。');
+    loggedTimelineLengths.set(job, job.timeline.length);
     if (job.phase === 'healthy' || job.phase === 'failed') return job;
 
     const jobTarget: WorkerTarget = {
@@ -362,9 +368,7 @@ export function createDeploymentService(dependencies: DeploymentServiceDependenc
       job.failure = deploymentFailure(error, job.phase);
       advance(job, 'failed', failureMessage(job.failure));
     }
-    await jobs.save(job);
-    const diagnostic = deploymentDiagnostic(job);
-    if (diagnostic) await appendDiagnostics([diagnostic]);
+    await saveJob(job);
     return job;
   }
 
