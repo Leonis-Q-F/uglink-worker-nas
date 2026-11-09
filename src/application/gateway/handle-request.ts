@@ -17,7 +17,7 @@ const REPLAY_SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const HTML_HEADERS = {
   'Cache-Control': 'no-store',
   'Content-Type': 'text/html; charset=utf-8',
-  'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://*.ug.link https://*.ugdocker.link; base-uri 'none'; frame-ancestors 'none'",
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'X-Content-Type-Options': 'nosniff'
 };

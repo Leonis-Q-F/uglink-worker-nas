@@ -211,6 +211,10 @@ test('ticket mode serves a launch page without issuing a login', async (context)
   assert.match(response.headers.get('content-type') ?? '', /text\/html/u);
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.equal(response.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
+  assert.match(
+    response.headers.get('content-security-policy') ?? '',
+    /form-action 'self' https:\/\/\*\.ug\.link https:\/\/\*\.ugdocker\.link/u
+  );
   const body = await response.text();
   assert.match(body, /打开服务/u);
   assert.match(body, /action="\/__uglink\/ticket"/u);
