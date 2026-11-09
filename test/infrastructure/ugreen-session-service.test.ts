@@ -293,6 +293,7 @@ test('ticket issuance stops after dockerToken without redeeming the one-time URL
   const encodedPublicKey = rsaPublicKey();
   const originalFetch = globalThis.fetch;
   let redirectCalls = 0;
+  const ticketUrl = 'https://app-8317-my-nas.cn30.ugdocker.link/api/ugreen/auth?token=one-time';
   context.after(() => {
     globalThis.fetch = originalFetch;
   });
@@ -306,10 +307,10 @@ test('ticket issuance stops after dockerToken without redeeming the one-time URL
     if (url.includes('/dockerToken?port=')) {
       return Response.json({
         code: 200,
-        data: { redirect_url: 'https://my-nas.example.ug.link/proxy/auth?ticket=one-time' }
+        data: { redirect_url: ticketUrl }
       });
     }
-    if (url.startsWith('https://my-nas.example.ug.link/proxy/auth')) {
+    if (url.startsWith('https://app-8317-my-nas.cn30.ugdocker.link/')) {
       redirectCalls += 1;
       throw new Error('ticket URL must not be redeemed by the Worker');
     }
@@ -324,7 +325,7 @@ test('ticket issuance stops after dockerToken without redeeming the one-time URL
   const ticket = await issueProxyTicket(runtime(kv.cache), '8317');
 
   assert.deepEqual(ticket, {
-    url: 'https://my-nas.example.ug.link/proxy/auth?ticket=one-time'
+    url: ticketUrl
   });
   assert.equal(redirectCalls, 0);
   assert.equal(kv.values.has(cacheKeys('stable-client-id', '8317').session), false);

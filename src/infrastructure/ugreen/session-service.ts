@@ -29,6 +29,7 @@ const DEFAULT_CLIENT_PROFILE = {
 const DISCOVERY_ENDPOINTS = ['api-zh', 'api-us', 'api-eur', 'api-aar']
   .map((region) => `https://${region}.ugnas.com/api/p2p/v2/ta/nodeInfo/byAlias`);
 const RELAY_DOMAIN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+ug\.link$/u;
+const DOCKER_RELAY_DOMAIN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+ugdocker\.link$/u;
 const UGLINK_ID = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 
 export interface SessionCache {
@@ -1038,7 +1039,11 @@ function trustedTicketRedirect(redirectUrl: string, loginOrigin: string): boolea
     const target = new URL(redirectUrl);
     const login = new URL(loginOrigin);
     return target.protocol === 'https:'
-      && (target.hostname === login.hostname || RELAY_DOMAIN.test(target.hostname));
+      && (
+        target.hostname === login.hostname
+        || RELAY_DOMAIN.test(target.hostname)
+        || DOCKER_RELAY_DOMAIN.test(target.hostname)
+      );
   } catch {
     return false;
   }
