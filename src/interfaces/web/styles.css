@@ -2429,7 +2429,7 @@ select:focus {
 
 .service-table__head,
 .service-table__row {
-  grid-template-columns: minmax(80px, 0.6fr) minmax(135px, 1fr) minmax(135px, 1fr) 74px 108px 84px 50px 38px;
+  grid-template-columns: minmax(78px, 0.6fr) minmax(135px, 1fr) minmax(150px, 1.15fr) 86px 108px 84px 50px 38px;
   gap: 10px;
 }
 
@@ -2455,6 +2455,20 @@ select:focus {
 .service-table__row input {
   height: 46px;
   font-size: 14px;
+}
+
+.service-table__row input[type="number"] {
+  appearance: textfield;
+}
+
+.service-table__row input[type="number"]::-webkit-inner-spin-button,
+.service-table__row input[type="number"]::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.service-table__address {
+  font-size: 13px;
 }
 
 .select-menu {

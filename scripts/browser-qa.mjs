@@ -364,7 +364,7 @@ try {
     return draft.uglink.id === 'qa-device'
       && draft.uglink.username === 'test-user'
       && draft.services[0]?.hostname === 'qa-api.example.com'
-      && draft.services[0]?.port === 9000;
+      && draft.services[0]?.port === 18563;
   });
   await page.getByRole('button', { name: /添加服务/ }).click();
   await page.getByLabel('第 1 个服务名').fill('qa-api');
@@ -372,7 +372,13 @@ try {
   const serviceAddress = page.getByRole('link', { name: 'https://qa-api.example.com' });
   assert(await serviceAddress.isVisible(), 'A valid custom domain is shown as the service access address.');
   assert(await serviceAddress.getAttribute('href') === 'https://qa-api.example.com', 'The service access address is a clickable HTTPS link.');
-  await page.getByLabel('第 1 个 NAS 端口').fill('9000');
+  assert(await serviceAddress.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)) >= 13, 'The service access address uses a readable font size.');
+  const portInput = page.getByLabel('第 1 个 NAS 端口');
+  await portInput.fill('18563');
+  assert(
+    await portInput.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    'A five-digit NAS port is fully visible.'
+  );
   const accessMode = page.getByRole('combobox', { name: '第 1 个访问方式' });
   assert(await accessMode.getAttribute('data-value') === 'proxy', 'New services default to reverse proxy access mode.');
   assert(await page.locator('.service-table__access-mode select').count() === 0, 'The service access mode does not use a native select popup.');
