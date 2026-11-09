@@ -18,7 +18,7 @@ const HTML_HEADERS = {
   'Cache-Control': 'no-store',
   'Content-Type': 'text/html; charset=utf-8',
   'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
-  'Referrer-Policy': 'no-referrer',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
   'X-Content-Type-Options': 'nosniff'
 };
 const TICKET_ERROR_MESSAGES: Record<string, string> = {
@@ -71,7 +71,6 @@ function ticketPage(request: Request, hostname: string, error?: string, status =
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="referrer" content="no-referrer">
   <title>打开 NAS 服务</title>
   <style>
     :root { color-scheme: light; font-family: ui-sans-serif, system-ui, sans-serif; }
@@ -137,10 +136,9 @@ async function ticketIssuanceResponse(
     return response;
   }
   if (isCrossOrigin(request)) {
-    return new Response('Cross-origin ticket issuance is not allowed', {
-      status: 403,
-      headers: { 'Cache-Control': 'no-store' }
-    });
+    const response = ticketPage(request, hostname, '请求来源校验失败，请从服务入口页重新打开后再试。', 403);
+    response.headers.set('X-UGLINK-Error', 'invalid_origin');
+    return response;
   }
 
   try {

@@ -210,9 +210,11 @@ test('ticket mode serves a launch page without issuing a login', async (context)
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/u);
   assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.equal(response.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
   const body = await response.text();
   assert.match(body, /打开服务/u);
   assert.match(body, /action="\/__uglink\/ticket"/u);
+  assert.doesNotMatch(body, /<meta name="referrer"/iu);
   assert.equal(calls, 0);
 });
 
@@ -266,10 +268,21 @@ test('ticket mode does not issue a ticket from GET or a cross-origin POST', asyn
     }),
     env
   );
+  const nullOriginResponse = await worker.fetch(
+    new Request('https://service.example.com/__uglink/ticket', {
+      method: 'POST',
+      headers: { Origin: 'null' }
+    }),
+    env
+  );
 
   assert.equal(getResponse.status, 405);
   assert.equal(getResponse.headers.get('allow'), 'POST');
   assert.equal(crossOriginResponse.status, 403);
+  assert.equal(crossOriginResponse.headers.get('x-uglink-error'), 'invalid_origin');
+  assert.match(await crossOriginResponse.text(), /请求来源校验失败/u);
+  assert.equal(nullOriginResponse.status, 403);
+  assert.equal(nullOriginResponse.headers.get('x-uglink-error'), 'invalid_origin');
   assert.equal(calls, 0);
 });
 

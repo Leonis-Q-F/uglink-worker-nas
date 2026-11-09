@@ -51,9 +51,15 @@ import { Brand } from './Brand';
 import { DiagnosticsPage } from './DiagnosticsPage';
 import { DataManagement } from './DataManagement';
 import { ProviderBadge } from './ProviderBadge';
+import { SelectMenu } from './SelectMenu';
 import { Toggle } from './Toggle';
 
 type Section = 'services' | 'diagnostics' | 'security';
+
+const ACCESS_MODE_OPTIONS = [
+  { value: 'proxy', label: '代理' },
+  { value: 'ticket', label: '票据' }
+] as const;
 
 interface DashboardProps {
   bootstrap: BootstrapResponse;
@@ -504,19 +510,15 @@ function ConfigEditor({
                 />
               </label>
               <div data-label="访问方式" className="service-table__access-mode">
-                <select
+                <SelectMenu
                   value={service.accessMode ?? 'proxy'}
-                  onChange={(event) => updateService(index, {
-                    accessMode: event.target.value === 'ticket' ? 'ticket' : 'proxy'
-                  })}
-                  aria-label={`第 ${index + 1} 个访问方式`}
+                  options={ACCESS_MODE_OPTIONS}
+                  onChange={(accessMode) => updateService(index, { accessMode })}
+                  ariaLabel={`第 ${index + 1} 个访问方式`}
                   title={service.accessMode === 'ticket'
                     ? '自定义域名仅作为入口，打开后跳转到绿联中继域名'
                     : '通过自定义域名持续反向代理服务'}
-                >
-                  <option value="proxy">代理</option>
-                  <option value="ticket">票据</option>
-                </select>
+                />
               </div>
               <div data-label="状态" className="service-table__status">
                 <ServiceStatus

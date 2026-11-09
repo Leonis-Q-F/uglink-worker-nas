@@ -2457,10 +2457,97 @@ select:focus {
   font-size: 14px;
 }
 
-.service-table__access-mode select {
+.select-menu {
+  width: 100%;
+  min-width: 0;
+}
+
+.select-menu__trigger {
+  display: flex;
+  width: 100%;
   height: 46px;
-  padding: 0 28px 0 12px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 16px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.select-menu__trigger:hover {
+  border-color: rgba(64, 158, 255, 0.45);
+}
+
+.select-menu__trigger[aria-expanded="true"],
+.select-menu__trigger:focus-visible {
+  border-color: var(--orange);
+  box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.13);
+  outline: none;
+}
+
+.select-menu__value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-menu__chevron {
+  flex: 0 0 auto;
+  color: var(--muted);
+  transition: transform 150ms ease;
+}
+
+.select-menu__trigger[aria-expanded="true"] .select-menu__chevron {
+  transform: rotate(180deg);
+}
+
+.select-menu__listbox {
+  position: fixed;
+  z-index: 1200;
+  display: grid;
+  gap: 2px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 14px;
+  padding: 6px;
+  background: #ffffff;
+  box-shadow: 0 18px 40px -18px rgba(15, 23, 42, 0.34), 0 6px 14px rgba(15, 23, 42, 0.06);
+}
+
+.select-menu__option {
+  display: flex;
+  width: 100%;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 0;
+  border-radius: 10px;
+  padding: 0 10px;
+  color: var(--ink-soft);
+  background: transparent;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.select-menu__option.is-active {
+  color: var(--navy);
+  background: var(--navy-soft);
+}
+
+.select-menu__option[aria-selected="true"] {
+  color: var(--navy);
+  font-weight: 700;
 }
 
 .service-status {
