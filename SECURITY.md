@@ -13,6 +13,9 @@
 - 代理必须保留后端应用自己的会话 Cookie，并把同源的 `Origin`、`Referer` 改写到实际上游；不得把客户端伪造的绿联代理 Cookie 转发到上游。
 - UGREENlink ID 只用于调用绿联发现接口；发现响应必须限长校验，只接受 `*.ug.link` HTTPS 中继域名，不记录响应中的局域网地址或完整设备 URL。
 - 缓存地址或代理连接失败时最多强制发现一次；登录尝试通过 KV 标记至少间隔 5 分钟，密码错误、账户锁定、OTP 等认证失败按类型退避 10 至 60 分钟，不得自动重复登录。
+- 票据入口签发的一次性 `redirect_url` 是 bearer credential。不得写入日志、分析事件或持久化存储，响应必须使用 `Cache-Control: no-store` 和 `Referrer-Policy: no-referrer`。
+- 票据只能由启动页的显式同源 `POST /__uglink/ticket` 触发，不能在普通 `GET`、预加载或页面渲染时自动签发。
+- 票据入口域名仍等价于 NAS 服务入口。需要限制访客时，应使用 Cloudflare Access、独立身份验证或网络访问控制。
 
 ## Docker
 

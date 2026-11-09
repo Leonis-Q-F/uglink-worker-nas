@@ -28,7 +28,12 @@ export async function createSessionNamespace(config: UglinkConfig): Promise<stri
 export async function createWorkerRuntimeBindings(config: UglinkConfig): Promise<WorkerRuntimeBindings> {
   const services = activeServices(config);
   const serviceMap = Object.fromEntries(
-    services.map((service) => [service.hostname.toLowerCase(), String(service.port)])
+    services.map((service) => [
+      service.hostname.toLowerCase(),
+      service.accessMode === 'ticket'
+        ? { port: String(service.port), accessMode: 'ticket' }
+        : String(service.port)
+    ])
   );
   return {
     UGLINK_ID: config.uglink.id,

@@ -52,4 +52,29 @@ describe('server-side configuration persistence', () => {
     expect(otherWorker.draft).toBeUndefined();
   });
 
+  it('persists valid service access modes and rejects unknown values', async () => {
+    const namespace = fakeKv();
+    const service = createConfigurationService(createKvConfigurationRepository(namespace, target()));
+    const draft = defaultConfig();
+    draft.services = [{
+      name: 'ticket',
+      hostname: 'ticket.example.com',
+      port: 9000,
+      enabled: true,
+      accessMode: 'ticket'
+    }];
+
+    await service.saveDraft(draft);
+
+    const reloaded = await createConfigurationService(
+      createKvConfigurationRepository(namespace, target())
+    ).read();
+    expect(reloaded.draft?.services[0]?.accessMode).toBe('ticket');
+
+    await expect(service.saveDraft({
+      ...draft,
+      services: [{ ...draft.services[0], accessMode: 'direct' }]
+    })).rejects.toThrow('accessMode');
+  });
+
 });

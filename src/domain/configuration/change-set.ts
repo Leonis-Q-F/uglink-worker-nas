@@ -12,7 +12,8 @@ export function serviceConfigurationsEqual(
     && left.name === right.name
     && left.hostname === right.hostname
     && left.port === right.port
-    && (left.enabled !== false) === (right.enabled !== false));
+    && (left.enabled !== false) === (right.enabled !== false)
+    && (left.accessMode ?? 'proxy') === (right.accessMode ?? 'proxy'));
 }
 
 function connectionConfigurationChanged(previous: UglinkConfig, next: UglinkConfig): boolean {

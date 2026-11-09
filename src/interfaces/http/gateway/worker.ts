@@ -1,6 +1,10 @@
 import { handleGatewayRequest } from '../../../application/gateway/handle-request';
 import { ugreenProxyTransport } from '../../../infrastructure/ugreen/proxy-transport';
-import { createUgreenSessionService } from '../../../infrastructure/ugreen/session-service';
+import {
+  createUgreenSessionService,
+  createUgreenTicketService,
+  type UgreenSessionRuntime
+} from '../../../infrastructure/ugreen/session-service';
 import type { GatewayWorkerEnv } from './environment';
 
 const logger = {
@@ -14,7 +18,7 @@ const logger = {
 
 export default {
   fetch(request: Request, env: GatewayWorkerEnv): Promise<Response> {
-    const sessions = createUgreenSessionService({
+    const runtime: UgreenSessionRuntime = {
       uglinkId: env.UGLINK_ID,
       username: env.USERNAME,
       password: env.PASSWORD,
@@ -24,12 +28,15 @@ export default {
         put: (key, value, options) => env.UGLINK_CACHE.put(key, value, options),
         delete: (key) => env.UGLINK_CACHE.delete(key)
       }
-    });
+    };
+    const sessions = createUgreenSessionService(runtime);
+    const tickets = createUgreenTicketService(runtime);
     return handleGatewayRequest(request, {
       serviceMap: env.SERVICE_MAP,
       setupMode: env.SETUP_MODE === 'true'
     }, {
       sessions,
+      tickets,
       transport: ugreenProxyTransport,
       logger
     });

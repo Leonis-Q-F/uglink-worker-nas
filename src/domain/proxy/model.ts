@@ -4,6 +4,10 @@ export interface ProxySession {
   loginOrigin: string;
 }
 
+export interface ProxyTicket {
+  url: string;
+}
+
 export type ProxyFailureCode =
   | 'invalid_credentials'
   | 'account_locked'

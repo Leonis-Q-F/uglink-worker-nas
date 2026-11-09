@@ -99,7 +99,8 @@ function serviceConfigurationsEqual(left, right) {
     && left.name === right.name
     && left.hostname === right.hostname
     && left.port === right.port
-    && (left.enabled !== false) === (right.enabled !== false));
+    && (left.enabled !== false) === (right.enabled !== false)
+    && (left.accessMode ?? 'proxy') === (right.accessMode ?? 'proxy'));
 }
 
 function servicesRequiringSynchronization(previous, next, mode, password) {
@@ -372,6 +373,9 @@ try {
   assert(await serviceAddress.isVisible(), 'A valid custom domain is shown as the service access address.');
   assert(await serviceAddress.getAttribute('href') === 'https://qa-api.example.com', 'The service access address is a clickable HTTPS link.');
   await page.getByLabel('第 1 个 NAS 端口').fill('9000');
+  const accessMode = page.getByLabel('第 1 个访问方式');
+  assert(await accessMode.inputValue() === 'proxy', 'New services default to reverse proxy access mode.');
+  assert(await accessMode.locator('option').count() === 2, 'The service access mode offers proxy and ticket options.');
   await page.getByLabel('UGREENlink ID').fill('qa-device');
   await page.getByLabel('登录用户名').fill('test-user');
   const passwordInput = page.getByLabel('登录密码');

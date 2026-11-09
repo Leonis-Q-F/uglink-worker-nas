@@ -1162,7 +1162,7 @@ button:disabled,
 .service-table__head,
 .service-table__row {
   display: grid;
-  grid-template-columns: minmax(90px, 0.7fr) minmax(160px, 1.25fr) minmax(145px, 1.1fr) minmax(84px, 0.5fr) minmax(82px, 0.6fr) 54px 44px;
+  grid-template-columns: minmax(76px, 0.6fr) minmax(132px, 1fr) minmax(132px, 1fr) 72px 100px 78px 46px 36px;
   align-items: center;
   gap: 8px;
 }
@@ -1192,8 +1192,15 @@ button:disabled,
   font-size: 11px;
 }
 
+.service-table__access-mode select {
+  height: 38px;
+  padding: 0 24px 0 9px;
+  font-size: 11px;
+}
+
 .service-table__status,
 .service-table__address,
+.service-table__access-mode,
 .service-table__toggle,
 .service-table__actions {
   display: flex;
@@ -2422,7 +2429,7 @@ select:focus {
 
 .service-table__head,
 .service-table__row {
-  grid-template-columns: minmax(90px, 0.72fr) minmax(160px, 1.2fr) minmax(160px, 1.15fr) 88px 92px 54px 44px;
+  grid-template-columns: minmax(80px, 0.6fr) minmax(135px, 1fr) minmax(135px, 1fr) 74px 108px 84px 50px 38px;
   gap: 10px;
 }
 
@@ -2448,6 +2455,12 @@ select:focus {
 .service-table__row input {
   height: 46px;
   font-size: 14px;
+}
+
+.service-table__access-mode select {
+  height: 46px;
+  padding: 0 28px 0 12px;
+  font-size: 13px;
 }
 
 .service-status {
@@ -2997,7 +3010,7 @@ select:focus {
 
   .service-table__head,
   .service-table__row {
-    grid-template-columns: minmax(70px, 0.7fr) minmax(125px, 1.2fr) minmax(120px, 1fr) 84px 78px 48px 38px;
+    grid-template-columns: minmax(70px, 0.65fr) minmax(120px, 1.1fr) minmax(115px, 1fr) 76px 96px 74px 46px 36px;
     gap: 6px;
   }
 
@@ -3168,8 +3181,19 @@ select:focus {
     grid-row: 1;
   }
 
+  .service-table__row label:first-child {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
+  .service-table__row label:nth-child(4) {
+    grid-column: 2;
+    grid-row: 3;
+  }
+
   .service-table__row label::before,
   .service-table__address::before,
+  .service-table__access-mode::before,
   .service-table__status::before,
   .service-table__toggle::before,
   .service-table__actions::before {
@@ -3194,6 +3218,7 @@ select:focus {
   .service-table__status {
     display: flex;
     grid-column: 1 / -1;
+    grid-row: 5;
     align-items: center;
     justify-content: space-between;
   }
@@ -3203,8 +3228,19 @@ select:focus {
   }
 
   .service-table__toggle,
+  .service-table__access-mode,
   .service-table__actions {
     display: block;
+  }
+
+  .service-table__access-mode {
+    grid-column: 1 / -1;
+    grid-row: 4;
+  }
+
+  .service-table__toggle,
+  .service-table__actions {
+    grid-row: 6;
   }
 
   .service-table__actions .icon-button {

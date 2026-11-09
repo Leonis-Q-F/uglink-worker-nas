@@ -356,7 +356,8 @@ function ConfigEditor({
         name: `service-${nextNumber}`,
         hostname: '',
         port: 80,
-        enabled: true
+        enabled: true,
+        accessMode: 'proxy'
       }]
     });
   };
@@ -444,17 +445,17 @@ function ConfigEditor({
         <div className="panel__heading panel__heading--row">
           <div>
             <p className="eyebrow">访问映射</p>
-            <h2>反向代理服务</h2>
-            <p>一项服务对应一个访问域名和一个 NAS 端口，可同时配置多项服务。</p>
+            <h2>服务访问映射</h2>
+            <p>反向代理保持自定义域名；票据入口只把域名当启动页，实际访问会跳转到绿联中继域名。</p>
           </div>
           <button className="button button--secondary" type="button" onClick={addService}>
             <Plus size={16} /> 添加服务
           </button>
         </div>
 
-        <div className="service-table" role="table" aria-label="反向代理服务列表">
+        <div className="service-table" role="table" aria-label="服务访问映射列表">
           <div className="service-table__head" role="row">
-            <span>服务名</span><span>完整域名</span><span>访问地址</span><span>NAS 端口</span><span>状态</span><span>启用</span><span>操作</span>
+            <span>服务名</span><span>完整域名</span><span>访问地址</span><span>NAS 端口</span><span>访问方式</span><span>状态</span><span>启用</span><span>操作</span>
           </div>
           {config.services.length === 0 && (
             <div className="empty-row"><ServerCog size={20} /><span>还没有服务。添加一行后即可配置域名和端口。</span></div>
@@ -502,6 +503,21 @@ function ConfigEditor({
                   aria-label={`第 ${index + 1} 个 NAS 端口`}
                 />
               </label>
+              <div data-label="访问方式" className="service-table__access-mode">
+                <select
+                  value={service.accessMode ?? 'proxy'}
+                  onChange={(event) => updateService(index, {
+                    accessMode: event.target.value === 'ticket' ? 'ticket' : 'proxy'
+                  })}
+                  aria-label={`第 ${index + 1} 个访问方式`}
+                  title={service.accessMode === 'ticket'
+                    ? '自定义域名仅作为入口，打开后跳转到绿联中继域名'
+                    : '通过自定义域名持续反向代理服务'}
+                >
+                  <option value="proxy">代理</option>
+                  <option value="ticket">票据</option>
+                </select>
+              </div>
               <div data-label="状态" className="service-table__status">
                 <ServiceStatus
                   value={resolveServiceStatus(

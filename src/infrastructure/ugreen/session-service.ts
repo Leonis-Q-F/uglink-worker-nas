@@ -1,11 +1,11 @@
 import JSEncrypt from 'jsencrypt';
 import { createHash } from 'node:crypto';
-import type { ProxySession } from '../../domain/proxy/model';
+import type { ProxySession, ProxyTicket } from '../../domain/proxy/model';
 import {
   ProxyAuthenticationError,
   type ProxyAuthenticationIssue
 } from '../../domain/proxy/errors';
-import type { ProxySessionService } from '../../application/gateway/ports';
+import type { ProxySessionService, ProxyTicketService } from '../../application/gateway/ports';
 
 const CACHE_TTL_SECONDS = 3600;
 const DISCOVERY_TTL_SECONDS = 300;
@@ -52,6 +52,11 @@ type LoginData =
 type LoginExchange = {
   data: LoginData;
   cookies: ResponseCookie[];
+};
+
+type AuthenticatedRedirect = {
+  redirectUrl: string;
+  loginOrigin: string;
 };
 
 type ResponseCookie = {
@@ -700,11 +705,23 @@ async function getDiscoveredOrigin(
   return { origin, cached: false };
 }
 
-async function createProxySessionAtOrigin(
+async function authenticateAtOrigin(
   runtime: UgreenSessionRuntime,
   port: string,
   loginOrigin: string
-): Promise<ProxySession> {
+): Promise<ProxySession>;
+async function authenticateAtOrigin(
+  runtime: UgreenSessionRuntime,
+  port: string,
+  loginOrigin: string,
+  ticketOnly: true
+): Promise<AuthenticatedRedirect>;
+async function authenticateAtOrigin(
+  runtime: UgreenSessionRuntime,
+  port: string,
+  loginOrigin: string,
+  ticketOnly = false
+): Promise<ProxySession | AuthenticatedRedirect> {
   // The official web client loads its version metadata before the user submits
   // the login form, then performs verify/check with a native browser fetch.
   const clientProfile = await loadClientProfile(loginOrigin);
@@ -844,6 +861,13 @@ async function createProxySessionAtOrigin(
     throw new ProxyAuthenticationError('unavailable');
   }
   logAuthPhase('docker_token', 'ok', dockerTokenStartedAt);
+
+  if (ticketOnly) {
+    return {
+      redirectUrl,
+      loginOrigin
+    };
+  }
 
   const redirectStartedAt = Date.now();
   let cookie: string | null;
@@ -1009,33 +1033,70 @@ async function createProxySessionAtOrigin(
   return session;
 }
 
-export async function createProxySession(
+function trustedTicketRedirect(redirectUrl: string, loginOrigin: string): boolean {
+  try {
+    const target = new URL(redirectUrl);
+    const login = new URL(loginOrigin);
+    return target.protocol === 'https:'
+      && (target.hostname === login.hostname || RELAY_DOMAIN.test(target.hostname));
+  } catch {
+    return false;
+  }
+}
+
+async function withAuthenticatedDiscovery<T>(
   runtime: UgreenSessionRuntime,
-  port: string,
-  forceDiscovery = false
-): Promise<ProxySession> {
+  forceDiscovery: boolean,
+  operation: (loginOrigin: string) => Promise<T>
+): Promise<T> {
   const attemptId = await reserveAuthenticationAttempt(runtime);
   try {
     const discovered = await getDiscoveredOrigin(runtime, forceDiscovery);
-    let session: ProxySession;
+    let result: T;
     try {
-      session = await createProxySessionAtOrigin(runtime, port, discovered.origin);
+      result = await operation(discovered.origin);
     } catch (error) {
       if (!(error instanceof UgreenOriginUnavailableError) || !discovered.cached || forceDiscovery) {
         throw error;
       }
       await runtime.cache.delete(discoveryCacheKey(runtime.sessionNamespace));
       const refreshed = await getDiscoveredOrigin(runtime, true);
-      session = await createProxySessionAtOrigin(runtime, port, refreshed.origin);
+      result = await operation(refreshed.origin);
     }
     await releaseAuthenticationAttempt(runtime, attemptId);
-    return session;
+    return result;
   } catch (error) {
     if (error instanceof ProxyAuthenticationError && error.apiCode !== 'backoff') {
       await cacheAuthenticationFailure(runtime, error);
     }
     throw error;
   }
+}
+
+export async function createProxySession(
+  runtime: UgreenSessionRuntime,
+  port: string,
+  forceDiscovery = false
+): Promise<ProxySession> {
+  return withAuthenticatedDiscovery(
+    runtime,
+    forceDiscovery,
+    (loginOrigin) => authenticateAtOrigin(runtime, port, loginOrigin)
+  );
+}
+
+export async function issueProxyTicket(
+  runtime: UgreenSessionRuntime,
+  port: string
+): Promise<ProxyTicket> {
+  return withAuthenticatedDiscovery(runtime, false, async (loginOrigin) => {
+    const ticket = await authenticateAtOrigin(runtime, port, loginOrigin, true);
+    if (!trustedTicketRedirect(ticket.redirectUrl, ticket.loginOrigin)) {
+      throw new Error('Docker token API returned an untrusted ticket redirect URL');
+    }
+    console.log(JSON.stringify({ event: 'proxy_ticket_issued', port }));
+    return { url: ticket.redirectUrl };
+  });
 }
 
 export async function getProxySession(runtime: UgreenSessionRuntime, port: string): Promise<ProxySession> {
@@ -1061,5 +1122,11 @@ export function createUgreenSessionService(runtime: UgreenSessionRuntime): Proxy
     get: (port) => getProxySession(runtime, port),
     refresh: (port) => refreshProxySession(runtime, port),
     invalidate: (port) => invalidateProxySession(runtime, port)
+  };
+}
+
+export function createUgreenTicketService(runtime: UgreenSessionRuntime): ProxyTicketService {
+  return {
+    issue: (port) => issueProxyTicket(runtime, port)
   };
 }

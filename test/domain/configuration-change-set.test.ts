@@ -45,3 +45,14 @@ test('connection, password, and overwrite changes synchronize every active servi
   assert.equal(servicesRequiringSynchronization(previous, connectionChanged).length, 2);
   assert.equal(servicesRequiringSynchronization(previous, config(), { forceAll: true }).length, 2);
 });
+
+test('an access mode change requires synchronization', () => {
+  const previous = config();
+  const next = config();
+  next.services[0]!.accessMode = 'ticket';
+
+  assert.deepEqual(
+    servicesRequiringSynchronization(previous, next).map((service) => service.hostname),
+    ['notes.example.com']
+  );
+});

@@ -40,6 +40,30 @@ test('generator creates SERVICE_MAP and custom domains from one service list', a
   assert.equal(generated.preview_urls, false);
 });
 
+test('generator keeps proxy routes compact and encodes ticket routes explicitly', async () => {
+  const config = resolveUglinkConfig({
+    version: 2,
+    uglink: {
+      id: 'device',
+      username: 'user'
+    },
+    services: [
+      { name: 'api', hostname: 'api.example.com', port: 8317 },
+      { name: 'ticket', hostname: 'ticket.example.com', port: 9000, accessMode: 'ticket' }
+    ]
+  });
+
+  assert.equal(config.services[0]?.accessMode, 'proxy');
+  assert.equal(config.services[1]?.accessMode, 'ticket');
+
+  const generated = await generateWranglerConfig(baseConfig, config);
+  const vars = generated.vars as Record<string, string>;
+  assert.equal(
+    vars.SERVICE_MAP,
+    '{"api.example.com":"8317","ticket.example.com":{"port":"9000","accessMode":"ticket"}}'
+  );
+});
+
 test('generator supports a safe first-deploy setup mode', async () => {
   const config = resolveUglinkConfig({
     version: 2,

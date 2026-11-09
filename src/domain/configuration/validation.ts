@@ -98,7 +98,7 @@ function shapeErrors(value: unknown): string[] {
         errors.push(`services[${index}] 必须是对象`);
         return;
       }
-      const extra = unexpectedKeys(service, ['name', 'hostname', 'port', 'enabled']);
+      const extra = unexpectedKeys(service, ['name', 'hostname', 'port', 'enabled', 'accessMode']);
       if (extra.length) errors.push(`services[${index}] 包含不支持的字段：${extra.join(', ')}`);
       if (typeof service.name !== 'string' || service.name.length > 64 || !SERVICE_NAME.test(service.name)) {
         errors.push(`services[${index}].name 格式无效`);
@@ -117,6 +117,13 @@ function shapeErrors(value: unknown): string[] {
       }
       if (service.enabled !== undefined && typeof service.enabled !== 'boolean') {
         errors.push(`services[${index}].enabled 必须是布尔值`);
+      }
+      if (
+        service.accessMode !== undefined
+        && service.accessMode !== 'proxy'
+        && service.accessMode !== 'ticket'
+      ) {
+        errors.push(`services[${index}].accessMode 必须是 proxy 或 ticket`);
       }
     });
   }
@@ -172,7 +179,8 @@ export function resolveUglinkConfig(value: unknown): ResolvedUglinkConfig {
     name: service.name,
     hostname: normalizeHostname(service.hostname),
     port: service.port,
-    enabled: service.enabled !== false
+    enabled: service.enabled !== false,
+    accessMode: service.accessMode === 'ticket' ? 'ticket' as const : 'proxy' as const
   }));
   const activeServices = services.filter((service) => service.enabled);
   if (activeServices.length > 0 && (!id || !username)) {
