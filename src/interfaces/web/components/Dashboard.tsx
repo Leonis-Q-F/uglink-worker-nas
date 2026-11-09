@@ -461,7 +461,7 @@ function ConfigEditor({
 
         <div className="service-table" role="table" aria-label="服务访问映射列表">
           <div className="service-table__head" role="row">
-            <span>服务名</span><span>完整域名</span><span>访问地址</span><span>NAS 端口</span><span>访问方式</span><span>状态</span><span>启用</span><span>操作</span>
+            <span>服务名</span><span>完整域名</span><span>入口地址</span><span>NAS 端口</span><span>访问方式</span><span>状态</span><span>启用</span><span>操作</span>
           </div>
           {config.services.length === 0 && (
             <div className="empty-row"><ServerCog size={20} /><span>还没有服务。添加一行后即可配置域名和端口。</span></div>
@@ -486,18 +486,29 @@ function ConfigEditor({
                   />
                 </div>
               </label>
-              <div data-label="访问地址" className="service-table__address">
+              <div
+                data-label="入口地址"
+                className={`service-table__address${service.accessMode === 'ticket' ? ' service-table__address--ticket' : ''}`}
+              >
                 {serviceAccessAddress(service.hostname) ? (
                   <a
                     href={serviceAccessAddress(service.hostname)}
                     target="_blank"
                     rel="noreferrer"
-                    aria-label={serviceAccessAddress(service.hostname)}
+                    aria-label={service.accessMode === 'ticket'
+                      ? `票据入口 ${serviceAccessAddress(service.hostname)}`
+                      : serviceAccessAddress(service.hostname)}
+                    title={service.accessMode === 'ticket'
+                      ? '打开票据启动页；签发后跳转到绿联中继地址'
+                      : serviceAccessAddress(service.hostname)}
                   >
                     <ExternalLink size={13} aria-hidden="true" />
                     <span>{serviceAccessAddress(service.hostname)}</span>
                   </a>
                 ) : <span>未配置</span>}
+                {service.accessMode === 'ticket' && (
+                  <small className="service-table__address-note">票据入口 · 动态跳转</small>
+                )}
               </div>
               <label data-label="NAS 端口">
                 <input

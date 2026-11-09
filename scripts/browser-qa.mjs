@@ -393,6 +393,11 @@ try {
   await page.screenshot({ path: screenshotPath('access-mode-menu.png'), fullPage: false });
   await accessModeMenu.getByRole('option', { name: '票据', exact: true }).click();
   assert(await accessMode.getAttribute('data-value') === 'ticket', 'Selecting ticket mode updates the service access mode.');
+  assert(
+    await page.getByText('票据入口 · 动态跳转', { exact: true }).isVisible(),
+    'Ticket mode distinguishes the custom-domain entry from the dynamic relay destination.'
+  );
+  await page.screenshot({ path: screenshotPath('ticket-entry-mode.png'), fullPage: false });
   await page.getByLabel('UGREENlink ID').fill('qa-device');
   await page.getByLabel('登录用户名').fill('test-user');
   const passwordInput = page.getByLabel('登录密码');
