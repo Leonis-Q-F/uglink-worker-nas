@@ -137,7 +137,7 @@ export function SelectMenu<T extends string>({
         className="select-menu__trigger"
         type="button"
         role="combobox"
-        aria-label={ariaLabel}
+        aria-label={`${ariaLabel}：${selectedOption?.label ?? ''}`}
         aria-controls={listboxId}
         aria-expanded={open}
         aria-haspopup="listbox"

@@ -1052,7 +1052,8 @@ function trustedTicketRedirect(redirectUrl: string, loginOrigin: string): boolea
 async function withAuthenticatedDiscovery<T>(
   runtime: UgreenSessionRuntime,
   forceDiscovery: boolean,
-  operation: (loginOrigin: string) => Promise<T>
+  operation: (loginOrigin: string) => Promise<T>,
+  options: { keepAttemptOnSuccess?: boolean } = {}
 ): Promise<T> {
   const attemptId = await reserveAuthenticationAttempt(runtime);
   try {
@@ -1068,7 +1069,9 @@ async function withAuthenticatedDiscovery<T>(
       const refreshed = await getDiscoveredOrigin(runtime, true);
       result = await operation(refreshed.origin);
     }
-    await releaseAuthenticationAttempt(runtime, attemptId);
+    if (!options.keepAttemptOnSuccess) {
+      await releaseAuthenticationAttempt(runtime, attemptId);
+    }
     return result;
   } catch (error) {
     if (error instanceof ProxyAuthenticationError && error.apiCode !== 'backoff') {
@@ -1094,14 +1097,19 @@ export async function issueProxyTicket(
   runtime: UgreenSessionRuntime,
   port: string
 ): Promise<ProxyTicket> {
-  return withAuthenticatedDiscovery(runtime, false, async (loginOrigin) => {
-    const ticket = await authenticateAtOrigin(runtime, port, loginOrigin, true);
-    if (!trustedTicketRedirect(ticket.redirectUrl, ticket.loginOrigin)) {
-      throw new Error('Docker token API returned an untrusted ticket redirect URL');
-    }
-    console.log(JSON.stringify({ event: 'proxy_ticket_issued', port }));
-    return { url: ticket.redirectUrl };
-  });
+  return withAuthenticatedDiscovery(
+    runtime,
+    false,
+    async (loginOrigin) => {
+      const ticket = await authenticateAtOrigin(runtime, port, loginOrigin, true);
+      if (!trustedTicketRedirect(ticket.redirectUrl, ticket.loginOrigin)) {
+        throw new Error('Docker token API returned an untrusted ticket redirect URL');
+      }
+      console.log(JSON.stringify({ event: 'proxy_ticket_issued', port }));
+      return { url: ticket.redirectUrl };
+    },
+    { keepAttemptOnSuccess: true }
+  );
 }
 
 export async function getProxySession(runtime: UgreenSessionRuntime, port: string): Promise<ProxySession> {

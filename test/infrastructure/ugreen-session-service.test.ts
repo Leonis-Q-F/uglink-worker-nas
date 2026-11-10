@@ -293,6 +293,7 @@ test('ticket issuance stops after dockerToken without redeeming the one-time URL
   const encodedPublicKey = rsaPublicKey();
   const originalFetch = globalThis.fetch;
   let redirectCalls = 0;
+  let dockerTokenCalls = 0;
   const ticketUrl = 'https://app-8317-my-nas.cn30.ugdocker.link/api/ugreen/auth?token=one-time';
   context.after(() => {
     globalThis.fetch = originalFetch;
@@ -305,6 +306,7 @@ test('ticket issuance stops after dockerToken without redeeming the one-time URL
     }
     if (url.endsWith('/verify/login')) return successfulLoginResponse(encodedPublicKey);
     if (url.includes('/dockerToken?port=')) {
+      dockerTokenCalls += 1;
       return Response.json({
         code: 200,
         data: { redirect_url: ticketUrl }
@@ -329,7 +331,13 @@ test('ticket issuance stops after dockerToken without redeeming the one-time URL
   });
   assert.equal(redirectCalls, 0);
   assert.equal(kv.values.has(cacheKeys('stable-client-id', '8317').session), false);
-  assert.equal(kv.values.has(authAttemptKey('stable-client-id')), false);
+  assert.equal(kv.values.has(authAttemptKey('stable-client-id')), true);
+  assert.equal(kv.ttls.get(authAttemptKey('stable-client-id')), 300);
+  await assert.rejects(
+    issueProxyTicket(runtime(kv.cache), '8317'),
+    (error: unknown) => error instanceof ProxyAuthenticationError && error.apiCode === 'backoff'
+  );
+  assert.equal(dockerTokenCalls, 1);
 });
 
 test('ticket issuance rejects redirects outside UGREEN relay hosts', async (context) => {

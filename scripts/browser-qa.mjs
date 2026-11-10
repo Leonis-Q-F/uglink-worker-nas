@@ -381,6 +381,7 @@ try {
   );
   const accessMode = page.getByRole('combobox', { name: '第 1 个访问方式' });
   assert(await accessMode.getAttribute('data-value') === 'proxy', 'New services default to reverse proxy access mode.');
+  assert((await accessMode.getAttribute('aria-label'))?.includes('代理'), 'The collapsed access mode exposes its current value to assistive technology.');
   assert(await page.locator('.service-table__access-mode select').count() === 0, 'The service access mode does not use a native select popup.');
   await accessMode.click();
   const accessModeMenu = page.getByRole('listbox', { name: '第 1 个访问方式' });
