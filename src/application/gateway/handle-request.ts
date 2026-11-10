@@ -112,11 +112,12 @@ function ticketFailureResponse(request: Request, hostname: string, error: unknow
 }
 
 function isCrossOrigin(request: Request): boolean {
+  const origin = request.headers.get('Origin');
+  if (!origin) return true;
+
   const fetchSite = request.headers.get('Sec-Fetch-Site');
   if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none') return true;
 
-  const origin = request.headers.get('Origin');
-  if (!origin) return false;
   try {
     return new URL(origin).origin !== new URL(request.url).origin;
   } catch {

@@ -279,6 +279,12 @@ test('ticket mode does not issue a ticket from GET or a cross-origin POST', asyn
     }),
     env
   );
+  const headerlessResponse = await worker.fetch(
+    new Request('https://service.example.com/__uglink/ticket', {
+      method: 'POST'
+    }),
+    env
+  );
 
   assert.equal(getResponse.status, 405);
   assert.equal(getResponse.headers.get('allow'), 'POST');
@@ -287,6 +293,8 @@ test('ticket mode does not issue a ticket from GET or a cross-origin POST', asyn
   assert.match(await crossOriginResponse.text(), /请求来源校验失败/u);
   assert.equal(nullOriginResponse.status, 403);
   assert.equal(nullOriginResponse.headers.get('x-uglink-error'), 'invalid_origin');
+  assert.equal(headerlessResponse.status, 403);
+  assert.equal(headerlessResponse.headers.get('x-uglink-error'), 'invalid_origin');
   assert.equal(calls, 0);
 });
 
