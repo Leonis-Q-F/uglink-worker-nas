@@ -1,6 +1,10 @@
 import { ApplicationError } from '../common/application-error';
 import { defaultConfig } from '../../domain/configuration/defaults';
-import type { UglinkConfig, UglinkService } from '../../domain/configuration/model';
+import type {
+  ServiceAccessMode,
+  UglinkConfig,
+  UglinkService
+} from '../../domain/configuration/model';
 import {
   configsEqual,
   resolveUglinkConfig,
@@ -27,6 +31,14 @@ function optionalBoolean(value: unknown, field: string): boolean | undefined {
   return value;
 }
 
+function optionalAccessMode(value: unknown, field: string): ServiceAccessMode | undefined {
+  if (value === undefined) return undefined;
+  if (value !== 'proxy' && value !== 'ticket') {
+    throw new ApplicationError(400, 'invalid_config', `${field} 必须是 proxy 或 ticket。`);
+  }
+  return value;
+}
+
 function boundedString(value: unknown, field: string, maximum: number): string {
   if (typeof value !== 'string' || value.length > maximum) {
     throw new ApplicationError(400, 'invalid_config', `${field} 格式无效。`);
@@ -43,11 +55,13 @@ function draftService(value: unknown, index: number): UglinkService {
     throw new ApplicationError(400, 'invalid_config', `services[${index}].port 必须是有效端口。`);
   }
   const enabled = optionalBoolean(value.enabled, `services[${index}].enabled`);
+  const accessMode = optionalAccessMode(value.accessMode, `services[${index}].accessMode`);
   return {
     name: boundedString(value.name, `services[${index}].name`, MAX_SERVICE_NAME_LENGTH),
     hostname: boundedString(value.hostname, `services[${index}].hostname`, MAX_HOSTNAME_LENGTH),
     port,
-    ...(enabled === undefined ? {} : { enabled })
+    ...(enabled === undefined ? {} : { enabled }),
+    ...(accessMode === undefined ? {} : { accessMode })
   };
 }
 

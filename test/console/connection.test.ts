@@ -20,7 +20,8 @@ function deployedConfig(): UglinkConfig {
     name: 'nas',
     hostname: 'nas.example.com',
     port: 9443,
-    enabled: true
+    enabled: true,
+    accessMode: 'proxy'
   }];
   config.deployment = { workersDev: false, previewUrls: false };
   return config;

@@ -51,6 +51,12 @@
             "minimum": 1,
             "maximum": 65535
           },
+          "accessMode": {
+            "type": "string",
+            "enum": ["proxy", "ticket"],
+            "default": "proxy",
+            "description": "proxy 保留自定义域名反向代理；ticket 仅签发票据，自定义域名作为跳转入口。"
+          },
           "enabled": {
             "type": "boolean",
             "default": true

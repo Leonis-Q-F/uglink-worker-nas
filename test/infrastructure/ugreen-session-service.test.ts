@@ -10,7 +10,8 @@ import {
   authAttemptKey,
   cacheKeys,
   createProxySession,
-  discoveryCacheKey
+  discoveryCacheKey,
+  issueProxyTicket
 } from '../../src/infrastructure/ugreen/session-service';
 import { ProxyAuthenticationError, proxyFailureCode } from '../../src/domain/proxy/errors';
 
@@ -286,6 +287,90 @@ test('a cached discovery origin is reused across service ports', async (context)
   await createProxySession(runtime(kv.cache), '9090');
 
   assert.equal(discoveryCalls, 1);
+});
+
+test('ticket issuance stops after dockerToken without redeeming the one-time URL', async (context) => {
+  const encodedPublicKey = rsaPublicKey();
+  const originalFetch = globalThis.fetch;
+  let redirectCalls = 0;
+  let dockerTokenCalls = 0;
+  const ticketUrl = 'https://app-8317-my-nas.cn30.ugdocker.link/api/ugreen/auth?token=one-time';
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/desktop/')) return new Response(null, { status: 404 });
+    if (url.endsWith('/verify/check')) {
+      return new Response(null, { headers: { 'X-Rsa-Token': encodedPublicKey } });
+    }
+    if (url.endsWith('/verify/login')) return successfulLoginResponse(encodedPublicKey);
+    if (url.includes('/dockerToken?port=')) {
+      dockerTokenCalls += 1;
+      return Response.json({
+        code: 200,
+        data: { redirect_url: ticketUrl }
+      });
+    }
+    if (url.startsWith('https://app-8317-my-nas.cn30.ugdocker.link/')) {
+      redirectCalls += 1;
+      throw new Error('ticket URL must not be redeemed by the Worker');
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  const kv = fakeKv({
+    [discoveryCacheKey('stable-client-id')]: JSON.stringify({
+      origin: 'https://my-nas.example.ug.link'
+    })
+  });
+
+  const ticket = await issueProxyTicket(runtime(kv.cache), '8317');
+
+  assert.deepEqual(ticket, {
+    url: ticketUrl
+  });
+  assert.equal(redirectCalls, 0);
+  assert.equal(kv.values.has(cacheKeys('stable-client-id', '8317').session), false);
+  assert.equal(kv.values.has(authAttemptKey('stable-client-id')), true);
+  assert.equal(kv.ttls.get(authAttemptKey('stable-client-id')), 300);
+  await assert.rejects(
+    issueProxyTicket(runtime(kv.cache), '8317'),
+    (error: unknown) => error instanceof ProxyAuthenticationError && error.apiCode === 'backoff'
+  );
+  assert.equal(dockerTokenCalls, 1);
+});
+
+test('ticket issuance rejects redirects outside UGREEN relay hosts', async (context) => {
+  const encodedPublicKey = rsaPublicKey();
+  const originalFetch = globalThis.fetch;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/desktop/')) return new Response(null, { status: 404 });
+    if (url.endsWith('/verify/check')) {
+      return new Response(null, { headers: { 'X-Rsa-Token': encodedPublicKey } });
+    }
+    if (url.endsWith('/verify/login')) return successfulLoginResponse(encodedPublicKey);
+    if (url.includes('/dockerToken?port=')) {
+      return Response.json({
+        code: 200,
+        data: { redirect_url: 'https://untrusted.example.test/ticket' }
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  const kv = fakeKv({
+    [discoveryCacheKey('stable-client-id')]: JSON.stringify({
+      origin: 'https://my-nas.example.ug.link'
+    })
+  });
+
+  await assert.rejects(
+    issueProxyTicket(runtime(kv.cache), '8317'),
+    /untrusted ticket redirect/u
+  );
 });
 
 test('failure at a cached origin forces discovery once before retrying login', async (context) => {

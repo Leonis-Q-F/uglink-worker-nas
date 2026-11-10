@@ -21,6 +21,7 @@
       "name": "nas-admin",
       "hostname": "nas.example.com",
       "port": 8443,
+      "accessMode": "proxy",
       "enabled": true
     }
   ]
@@ -34,9 +35,30 @@
 | `services[].name` | 用于识别服务的名称 |
 | `services[].hostname` | 绑定到 Gateway 的自定义域名 |
 | `services[].port` | NAS 上目标服务的端口 |
+| `services[].accessMode` | 访问方式。`proxy` 为反向代理，`ticket` 为票据入口；省略时使用 `proxy` |
 | `services[].enabled` | 是否发布此服务映射，省略时启用 |
 
 每个启用的服务使用独立域名。密码不放入此文件，而是作为 Gateway 的 `PASSWORD` Secret 配置。密码更新后，应在控制台重新输入并发布，或通过 Wrangler 更新同一个 Secret。
+
+### 访问方式
+
+`proxy` 是默认方式，自定义域名始终是实际访问地址，全部请求由 Gateway Worker 转发到 NAS。
+
+`ticket` 只把自定义域名作为启动入口：
+
+1. 浏览器访问自定义域名时，Worker 返回一个启动页，不会自动登录或签发票据。
+2. 用户点击“打开服务”后，页面提交 `POST /__uglink/ticket`。
+3. Worker 完成绿联登录并取得一次性 `redirect_url`，返回 `303` 跳转。
+4. 浏览器随后在绿联中继域名上完成票据交接，后续流量不再经过 Gateway Worker。
+
+票据入口模式有以下边界：
+
+- Docker 服务跳转后地址栏会变成 `*.ugdocker.link`，其他入口可能使用 `*.ug.link`；自定义域名不再是应用页面的 origin。
+- 依赖固定 origin 的 Cookie、PWA、OAuth 回调、WebAuthn 和深链接可能失效；此类服务应继续使用 `proxy`。
+- 链接只对一次打开有效。刷新页面或重新访问服务时，需要回到自定义域名重新签发。
+- 同一 UGREENlink 账号的认证尝试至少间隔 5 分钟；短时间重复点击会提示稍后再试。
+- 当前不支持开启二次验证的账号；账号返回 `otp_required` 时无法使用票据模式。
+- 票据入口本身等价于 NAS 服务入口。若不应允许所有互联网访客自助取票，应在 Cloudflare Access 或其他身份验证层后面保护该域名。
 
 完整字段约束见 [`uglink.config.schema.json`](../uglink.config.schema.json)。本地文件可通过 `npm run config:validate` 检查。
 

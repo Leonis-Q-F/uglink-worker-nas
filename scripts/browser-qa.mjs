@@ -99,7 +99,8 @@ function serviceConfigurationsEqual(left, right) {
     && left.name === right.name
     && left.hostname === right.hostname
     && left.port === right.port
-    && (left.enabled !== false) === (right.enabled !== false));
+    && (left.enabled !== false) === (right.enabled !== false)
+    && (left.accessMode ?? 'proxy') === (right.accessMode ?? 'proxy'));
 }
 
 function servicesRequiringSynchronization(previous, next, mode, password) {
@@ -363,7 +364,7 @@ try {
     return draft.uglink.id === 'qa-device'
       && draft.uglink.username === 'test-user'
       && draft.services[0]?.hostname === 'qa-api.example.com'
-      && draft.services[0]?.port === 9000;
+      && draft.services[0]?.port === 18563;
   });
   await page.getByRole('button', { name: /添加服务/ }).click();
   await page.getByLabel('第 1 个服务名').fill('qa-api');
@@ -371,7 +372,33 @@ try {
   const serviceAddress = page.getByRole('link', { name: 'https://qa-api.example.com' });
   assert(await serviceAddress.isVisible(), 'A valid custom domain is shown as the service access address.');
   assert(await serviceAddress.getAttribute('href') === 'https://qa-api.example.com', 'The service access address is a clickable HTTPS link.');
-  await page.getByLabel('第 1 个 NAS 端口').fill('9000');
+  assert(await serviceAddress.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)) >= 13, 'The service access address uses a readable font size.');
+  const portInput = page.getByLabel('第 1 个 NAS 端口');
+  await portInput.fill('18563');
+  assert(
+    await portInput.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    'A five-digit NAS port is fully visible.'
+  );
+  const accessMode = page.getByRole('combobox', { name: '第 1 个访问方式' });
+  assert(await accessMode.getAttribute('data-value') === 'proxy', 'New services default to reverse proxy access mode.');
+  assert((await accessMode.getAttribute('aria-label'))?.includes('代理'), 'The collapsed access mode exposes its current value to assistive technology.');
+  assert(await page.locator('.service-table__access-mode select').count() === 0, 'The service access mode does not use a native select popup.');
+  await accessMode.click();
+  const accessModeMenu = page.getByRole('listbox', { name: '第 1 个访问方式' });
+  assert(await accessModeMenu.isVisible(), 'The service access mode opens a styled listbox.');
+  assert(await accessModeMenu.getByRole('option').count() === 2, 'The service access mode offers proxy and ticket options.');
+  assert(
+    await accessModeMenu.evaluate((element) => getComputedStyle(element).position) === 'fixed',
+    'The service access mode popup escapes the scrollable service table.'
+  );
+  await page.screenshot({ path: screenshotPath('access-mode-menu.png'), fullPage: false });
+  await accessModeMenu.getByRole('option', { name: '票据', exact: true }).click();
+  assert(await accessMode.getAttribute('data-value') === 'ticket', 'Selecting ticket mode updates the service access mode.');
+  assert(
+    await page.getByText('票据入口 · 动态跳转', { exact: true }).isVisible(),
+    'Ticket mode distinguishes the custom-domain entry from the dynamic relay destination.'
+  );
+  await page.screenshot({ path: screenshotPath('ticket-entry-mode.png'), fullPage: false });
   await page.getByLabel('UGREENlink ID').fill('qa-device');
   await page.getByLabel('登录用户名').fill('test-user');
   const passwordInput = page.getByLabel('登录密码');
@@ -388,9 +415,11 @@ try {
   const draftConfig = draftResponse.request().postDataJSON().config;
   assert(draftConfig.uglink.id === 'qa-device', 'The draft persists the UGREENlink ID.');
   assert(draftConfig.uglink.username === 'test-user', 'The draft persists the NAS login username separately.');
+  assert(draftConfig.services[0]?.accessMode === 'ticket', 'The draft persists the selected service access mode.');
   assert(!JSON.stringify(draftConfig).includes('qa-visible-secret'), 'The NAS password is absent from persisted configuration.');
   await page.reload({ waitUntil: 'networkidle' });
   assert(await page.getByLabel('第 1 个服务域名').inputValue() === 'qa-api.example.com', 'The browser-local draft survives reload.');
+  assert(await page.getByRole('combobox', { name: '第 1 个访问方式' }).getAttribute('data-value') === 'ticket', 'The service access mode survives reload.');
   assert(await page.getByLabel('UGREENlink ID').inputValue() === 'qa-device', 'The UGREENlink ID survives reload.');
   assert(await page.getByLabel('登录用户名').inputValue() === 'test-user', 'The NAS login username survives reload.');
   assert(await page.getByLabel('登录密码').inputValue() === '', 'The NAS password never survives reload.');
@@ -406,6 +435,7 @@ try {
   await page.getByRole('button', { name: /发布更改/ }).click();
   await publishResponse;
   assert(lastDeploymentRequest.password === 'qa-deploy-secret', 'The NAS password is submitted only as the top-level deployment secret.');
+  assert(lastDeploymentRequest.config.services[0]?.accessMode === 'ticket', 'The selected service access mode is included in deployment.');
   assert(!JSON.stringify(lastDeploymentRequest.config).includes('qa-deploy-secret'), 'The NAS password is absent from the deployed configuration.');
   await page.getByRole('heading', { name: '服务配置', exact: true }).waitFor();
   await page.locator('.service-status--success').waitFor({ timeout: 10_000 });

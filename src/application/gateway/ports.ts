@@ -1,9 +1,13 @@
-import type { ProxySession } from '../../domain/proxy/model';
+import type { ProxySession, ProxyTicket } from '../../domain/proxy/model';
 
 export interface ProxySessionService {
   get(port: string): Promise<ProxySession>;
   refresh(port: string): Promise<ProxySession>;
   invalidate(port: string): Promise<void>;
+}
+
+export interface ProxyTicketService {
+  issue(port: string): Promise<ProxyTicket>;
 }
 
 export interface ProxyTransport {

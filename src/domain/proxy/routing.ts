@@ -1,5 +1,16 @@
+import type { ServiceAccessMode } from '../configuration/model';
+
+export interface ServiceRoute {
+  port: string;
+  accessMode: ServiceAccessMode;
+}
+
 function normalizeHostname(hostname: string): string {
   return hostname.trim().toLowerCase().replace(/\.$/u, '');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function validatePort(value: unknown, hostname: string): string {
@@ -15,7 +26,22 @@ function validatePort(value: unknown, hostname: string): string {
   return String(portNumber);
 }
 
-export function parseServiceMap(rawServiceMap: string): Map<string, string> {
+function validateServiceRoute(value: unknown, hostname: string): ServiceRoute {
+  if (!isRecord(value)) {
+    return { port: validatePort(value, hostname), accessMode: 'proxy' };
+  }
+
+  const accessMode = value.accessMode ?? 'proxy';
+  if (accessMode !== 'proxy' && accessMode !== 'ticket') {
+    throw new Error(`SERVICE_MAP has an invalid accessMode for ${hostname}`);
+  }
+  return {
+    port: validatePort(value.port, hostname),
+    accessMode
+  };
+}
+
+export function parseServiceMap(rawServiceMap: string): Map<string, ServiceRoute> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawServiceMap);
@@ -26,11 +52,11 @@ export function parseServiceMap(rawServiceMap: string): Map<string, string> {
     throw new Error('SERVICE_MAP must be a JSON object');
   }
 
-  const services = new Map<string, string>();
+  const services = new Map<string, ServiceRoute>();
   for (const [hostname, value] of Object.entries(parsed)) {
     const normalizedHostname = normalizeHostname(hostname);
     if (!normalizedHostname) throw new Error('SERVICE_MAP contains an empty hostname');
-    services.set(normalizedHostname, validatePort(value, normalizedHostname));
+    services.set(normalizedHostname, validateServiceRoute(value, normalizedHostname));
   }
   return services;
 }

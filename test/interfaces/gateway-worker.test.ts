@@ -54,6 +54,17 @@ function cachedEnvironment(): {
   };
 }
 
+function ticketEnvironment(): {
+  env: GatewayWorkerEnv;
+  values: Map<string, string>;
+  keys: { session: string };
+} {
+  const cached = cachedEnvironment();
+  cached.values.clear();
+  cached.env.SERVICE_MAP = '{"service.example.com":{"port":"8317","accessMode":"ticket"}}';
+  return cached;
+}
+
 function installSuccessfulLoginFetch(
   publicKey: string,
   proxyResponse: (call: number) => Response
@@ -111,6 +122,51 @@ function installSuccessfulLoginFetch(
   };
 }
 
+function installTicketFetch(publicKey: string): {
+  fetch: typeof globalThis.fetch;
+  redirectCalls: () => number;
+  ticketUrl: string;
+} {
+  const encodedPublicKey = Buffer.from(publicKey).toString('base64');
+  const ticketUrl = 'https://test-device.example.ug.link/proxy/ticket?ticket=one-time';
+  let redirectCallCount = 0;
+
+  const fetch: typeof globalThis.fetch = async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/desktop/')) return new Response(null, { status: 404 });
+    if (url === 'https://api-zh.ugnas.com/api/p2p/v2/ta/nodeInfo/byAlias') {
+      return Response.json({ code: 200, data: { alias: 'test-device', relayDomain: 'example.ug.link' } });
+    }
+    if (url === 'https://test-device.example.ug.link/ugreen/v1/verify/check') {
+      return new Response(null, { headers: { 'X-Rsa-Token': encodedPublicKey } });
+    }
+    if (url === 'https://test-device.example.ug.link/ugreen/v1/verify/login') {
+      return Response.json({
+        code: 200,
+        data: {
+          public_key: encodedPublicKey,
+          token: 'temporary-token',
+          token_id: 'token-id'
+        }
+      });
+    }
+    if (url.startsWith('https://test-device.example.ug.link/ugreen/v1/gateway/proxy/dockerToken?')) {
+      return Response.json({ code: 200, data: { redirect_url: ticketUrl } });
+    }
+    if (url === ticketUrl) {
+      redirectCallCount += 1;
+      throw new Error('ticket URL must not be redeemed by the Worker');
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  return {
+    fetch,
+    redirectCalls: () => redirectCallCount,
+    ticketUrl
+  };
+}
+
 test('application 401 and 403 responses pass through without refreshing UGREEN', async (context) => {
   const originalFetch = globalThis.fetch;
   context.after(() => {
@@ -135,6 +191,111 @@ test('application 401 and 403 responses pass through without refreshing UGREEN',
     assert.equal(calls, 1);
     assert.equal(JSON.parse(values.get(keys.session) ?? '').cookie, 'ugreen-proxy-token=cached-session');
   }
+});
+
+test('ticket mode serves a launch page without issuing a login', async (context) => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async () => {
+    calls += 1;
+    throw new Error('ticket launch page must not start authentication');
+  };
+  const { env } = ticketEnvironment();
+
+  const response = await worker.fetch(new Request('https://service.example.com/'), env);
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/u);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.equal(response.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
+  assert.match(
+    response.headers.get('content-security-policy') ?? '',
+    /form-action 'self' https:\/\/\*\.ug\.link https:\/\/\*\.ugdocker\.link/u
+  );
+  const body = await response.text();
+  assert.match(body, /打开服务/u);
+  assert.match(body, /action="\/__uglink\/ticket"/u);
+  assert.doesNotMatch(body, /<meta name="referrer"/iu);
+  assert.equal(calls, 0);
+});
+
+test('ticket mode issues a ticket only for an explicit same-origin POST', async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const { publicKey } = generateKeyPairSync('rsa', {
+    modulusLength: 1024,
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+  });
+  const mocked = installTicketFetch(publicKey);
+  globalThis.fetch = mocked.fetch;
+  const { env, values, keys } = ticketEnvironment();
+
+  const response = await worker.fetch(new Request('https://service.example.com/__uglink/ticket', {
+    method: 'POST',
+    headers: { Origin: 'https://service.example.com' }
+  }), env);
+
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.get('location'), mocked.ticketUrl);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
+  assert.equal(mocked.redirectCalls(), 0);
+  assert.equal(values.has(keys.session), false);
+});
+
+test('ticket mode does not issue a ticket from GET or a cross-origin POST', async (context) => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async () => {
+    calls += 1;
+    throw new Error('ticket mode must reject unapproved issuance attempts');
+  };
+  const { env } = ticketEnvironment();
+
+  const getResponse = await worker.fetch(
+    new Request('https://service.example.com/__uglink/ticket'),
+    env
+  );
+  const crossOriginResponse = await worker.fetch(
+    new Request('https://service.example.com/__uglink/ticket', {
+      method: 'POST',
+      headers: { Origin: 'https://evil.example.test' }
+    }),
+    env
+  );
+  const nullOriginResponse = await worker.fetch(
+    new Request('https://service.example.com/__uglink/ticket', {
+      method: 'POST',
+      headers: { Origin: 'null' }
+    }),
+    env
+  );
+  const headerlessResponse = await worker.fetch(
+    new Request('https://service.example.com/__uglink/ticket', {
+      method: 'POST'
+    }),
+    env
+  );
+
+  assert.equal(getResponse.status, 405);
+  assert.equal(getResponse.headers.get('allow'), 'POST');
+  assert.equal(crossOriginResponse.status, 403);
+  assert.equal(crossOriginResponse.headers.get('x-uglink-error'), 'invalid_origin');
+  assert.match(await crossOriginResponse.text(), /请求来源校验失败/u);
+  assert.equal(nullOriginResponse.status, 403);
+  assert.equal(nullOriginResponse.headers.get('x-uglink-error'), 'invalid_origin');
+  assert.equal(headerlessResponse.status, 403);
+  assert.equal(headerlessResponse.headers.get('x-uglink-error'), 'invalid_origin');
+  assert.equal(calls, 0);
 });
 
 test('a UGREEN login redirect refreshes the session and retries a GET once', async (context) => {

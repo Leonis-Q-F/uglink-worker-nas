@@ -28,7 +28,8 @@ function configuredConfig(): UglinkConfig {
     name: 'app',
     hostname: 'app.example.com',
     port: 8080,
-    enabled: true
+    enabled: true,
+    accessMode: 'proxy'
   }];
   config.deployment = { workersDev: false, previewUrls: false };
   return config;
